@@ -35,6 +35,16 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Go Modules
+        run: |
+          go mod verify
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "go.mod or go.sum is out of date. Run 'make tidy' and commit."
+            git diff go.mod go.sum
+            exit 1
+          fi
+
       - name: Run Go Vet
         run: go vet ./...
 
@@ -45,6 +55,9 @@ jobs:
 
       - name: Run Tests with Race Detector
         run: go test -v -race ./...
+
+      - name: Build All Packages
+        run: go build ./...
 
       - name: Build Binary
         run: go build -v -o bin/mobius ./cmd/mobius

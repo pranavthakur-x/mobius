@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"os"
 	"path/filepath"
 
 	"mobius/pkg/agent"
@@ -525,10 +524,6 @@ func (b *TUIBackend) session(chatID string) (*session.Session, error) {
 		}
 	}
 	return nil, fmt.Errorf("session %s not found", chatID)
-}
-
-func readFileFirst(path string) ([]byte, error) {
-	return os.ReadFile(path)
 }
 
 func (b *TUIBackend) chatToolDefs(ws *orchestrator.Workspace, viewRoleID string) []llm.ToolDefinition {
