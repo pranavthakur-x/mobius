@@ -1,0 +1,5 @@
+id: product
+name: Product
+roles:
+  - product_manager
+default_lead: product_manager
