@@ -43,7 +43,6 @@ type Model struct {
 	menuIDs       []string
 	roleNames     []string
 	routing       bool
-	toolsExpanded bool
 
 	sidebarBreakdown ContextBreakdown
 	subCancel        context.CancelFunc
