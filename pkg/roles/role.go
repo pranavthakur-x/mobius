@@ -30,11 +30,12 @@ var standardToolSet = func() map[string]struct{} {
 
 // Role is one drop-in teammate loaded from roles/<id>.yml.
 type Role struct {
-	ID         string
-	Name       string
-	Department string
-	System     string
-	Tools      []string
+	ID          string
+	Name        string
+	Description string
+	Department  string
+	System      string
+	Tools       []string
 }
 
 // Department is a team loaded from roles/departments/<id>.yml.

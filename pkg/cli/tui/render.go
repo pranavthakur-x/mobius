@@ -112,7 +112,7 @@ func renderTranscriptLine(bl TranscriptBlock, chatWidth int, showSteps bool) []s
 	case BlockFinal:
 		dot := roleDot(bl.RoleID, bl.Speaker)
 		head := dot + " " + StyleMuted.Render(bl.Speaker)
-		body := WrapRunes(bl.Text, chatWidth-2)
+		body := RenderMarkdown(bl.Text, chatWidth-2)
 		var out []string
 		out = append(out, head)
 		for _, ln := range body {

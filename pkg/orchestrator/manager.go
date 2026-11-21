@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -64,13 +65,16 @@ func (m *Manager) CreateTeam(deptID string) error {
 		if err != nil {
 			return fmt.Errorf("worker %q: %w", roleID, err)
 		}
-		sess := session.NewSession(ag.ThreadID(), role.Name, ag, role.System)
+		sess := session.NewRoleSession(ag.ThreadID(), role.Name, ag, role.System)
 		sess.MarkStarted(role.Name)
 		w := &Worker{
-			RoleID:  role.ID,
-			TeamID:  team.ID,
-			Name:    role.Name,
-			Session: sess,
+			RoleID:      role.ID,
+			TeamID:      team.ID,
+			Name:        role.Name,
+			Session:     sess,
+			description: role.Description,
+			roleSystem:  role.System,
+			tools:       append([]string(nil), role.Tools...),
 		}
 		team.workers = append(team.workers, w)
 		team.workerIndex[role.ID] = w
@@ -318,13 +322,16 @@ func (m *Manager) ReloadRoles(ctx context.Context) error {
 				m.mu.Unlock()
 				return err
 			}
-			sess := session.NewSession(ag.ThreadID(), role.Name, ag, role.System)
+			sess := session.NewRoleSession(ag.ThreadID(), role.Name, ag, role.System)
 			sess.MarkStarted(role.Name)
 			w := &Worker{
-				RoleID:  role.ID,
-				TeamID:  team.ID,
-				Name:    role.Name,
-				Session: sess,
+				RoleID:      role.ID,
+				TeamID:      team.ID,
+				Name:        role.Name,
+				Session:     sess,
+				description: role.Description,
+				roleSystem:  role.System,
+				tools:       append([]string(nil), role.Tools...),
 			}
 			newWorkers = append(newWorkers, w)
 			newIndex[roleID] = w
@@ -347,21 +354,16 @@ func (m *Manager) ReloadRoles(ctx context.Context) error {
 }
 
 func roleUnchanged(w *Worker, role roles.Role) bool {
-	if w.Name != role.Name {
+	if w == nil || w.Name != role.Name {
 		return false
 	}
-	if w.Session.Context == nil {
+	if w.Session == nil || w.Session.Context == nil {
 		return false
 	}
-	msgs := w.Session.Context.Messages()
-	if len(msgs) == 0 {
+	if len(w.Session.Context.Messages()) == 0 {
 		return false
 	}
-	content := msgs[0].Content
-	if i := strings.Index(content, "\n\n# Limits\n"); i >= 0 {
-		content = content[:i]
-	}
-	return content == role.System
+	return w.description == role.Description && w.roleSystem == role.System && slices.Equal(w.tools, role.Tools)
 }
 
 // CatalogSnapshot builds JSON for routing.
@@ -382,9 +384,11 @@ func (m *Manager) CatalogSnapshot() CatalogSnapshot {
 		for _, w := range team.workers {
 			_, busy := m.claims[claimKey{teamID: team.ID, roleID: w.RoleID}]
 			ct.Roles = append(ct.Roles, CatalogRole{
-				ID:   w.RoleID,
-				Name: w.Name,
-				Busy: busy,
+				ID:          w.RoleID,
+				Name:        w.Name,
+				Description: w.description,
+				Tools:       append([]string(nil), w.tools...),
+				Busy:        busy,
 			})
 		}
 		snap.Teams = append(snap.Teams, ct)

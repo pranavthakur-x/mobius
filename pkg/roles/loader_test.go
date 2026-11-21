@@ -30,6 +30,9 @@ func TestShippedEngineeringCatalog(t *testing.T) {
 	if !ok || engineer.Name != "Software Engineer" {
 		t.Fatalf("software engineer = %+v", engineer)
 	}
+	if engineer.Description == "" {
+		t.Fatal("expected shipped software_engineer description")
+	}
 	if strings.Join(engineer.Tools, ",") != "view_file,list_dir,grep_search,edit_file,write_file,run_command" {
 		t.Fatalf("engineer tools = %v", engineer.Tools)
 	}
@@ -37,6 +40,9 @@ func TestShippedEngineeringCatalog(t *testing.T) {
 	review, ok := catalog.Role("code_review")
 	if !ok || review.Name != "Code Review" {
 		t.Fatalf("code review = %+v", review)
+	}
+	if review.Description == "" {
+		t.Fatal("expected shipped code_review description")
 	}
 	for _, tool := range review.Tools {
 		switch tool {
@@ -197,6 +203,20 @@ default_lead: missing
 				writeFile(t, filepath.Join(dir, "big.yml"), string(bytes.Repeat([]byte("a"), MaxFileBytes+1)))
 			},
 			wantErr: ErrTooLarge,
+		},
+		{
+			name: "description control char",
+			write: func(t *testing.T, dir string) {
+				writeFile(t, filepath.Join(dir, "solo.yml"), "id: solo\nname: Solo\ndescription: \"line1\\nline2\"\ndepartment: research\nsystem: hello\n")
+			},
+			text: "control character",
+		},
+		{
+			name: "description too long",
+			write: func(t *testing.T, dir string) {
+				writeFile(t, filepath.Join(dir, "solo.yml"), "id: solo\nname: Solo\ndescription: "+strings.Repeat("x", maxDescriptionRunes+1)+"\ndepartment: research\nsystem: hello\n")
+			},
+			text: "exceeds",
 		},
 	}
 

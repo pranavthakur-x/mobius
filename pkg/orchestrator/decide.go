@@ -20,7 +20,17 @@ func (w *Workspace) Decide(ctx context.Context, userText string) (Decision, erro
 	if err != nil {
 		return Decision{}, err
 	}
-	userContent := fmt.Sprintf("<team_catalog>\n%s\n</team_catalog>\n<user_message>\n%s\n</user_message>", catalog, userJSON)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "<team_catalog>\n%s\n</team_catalog>\n", catalog)
+	if recent := w.recentSnapshot(); len(recent) > 0 {
+		recentJSON, err := json.Marshal(recent)
+		if err != nil {
+			return Decision{}, err
+		}
+		fmt.Fprintf(&sb, "<recent_turns>\n%s\n</recent_turns>\n", recentJSON)
+	}
+	fmt.Fprintf(&sb, "<user_message>\n%s\n</user_message>", userJSON)
+	userContent := sb.String()
 
 	req := &llm.ChatRequest{
 		Model: w.model.Name,

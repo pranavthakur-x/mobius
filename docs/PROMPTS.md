@@ -1,25 +1,26 @@
 # Mobius prompt design
 
-Prompts are split on purpose (harness playbook + Anthropic/OpenAI agent guidance):
+Prompts are split into non-overlapping layers so every token earns its slot and no rule is repeated across layers:
 
 | Layer | File | Role |
 |-------|------|------|
-| Core behavior | `pkg/agentctx/prompt.go` | Identity, workflow, tools, safety — stable across projects |
-| REPL / repo | `config/repl_guide.md` | Overrides IDE tutor rules; verification commands; examples |
-| Optional context | `AGENTS.md` (low priority in `config/guides.toml`) | Background architecture for Cursor; not the REPL persona |
+| Core harness rules | `pkg/agentctx/prompt.go` | Grounding, workflow, tool discipline, error recovery, reversibility/safety, output shape |
+| Workspace guide | `config/repl_guide.md` (via `config/guides.toml`) | Stack-agnostic workspace conventions (native verification discovery, sensor compliance, style matching) |
+| Specialist roles | `roles/*.yml` | Role persona, craft methodology, and role-specific output contract |
+| Multi-agent router | `pkg/orchestrator/prompt.go` | Zero-tool JSON routing schema, untrusted-input boundary, self-contained worker briefs |
+| Execution limits | `pkg/session/session.go` | Step, USD cost, and timeout caps from `config/agent.toml` |
 
-**Precedence:** `config/guides.toml` loads multiple files; higher `priority` is appended **last** and wins on conflict (`pkg/guides/guides.go`).
+**Composition:**
+- Solo sessions (`session.NewSession` with empty override): `Core -> Repo guides -> Limits`.
+- Role workers (`session.NewRoleSession`): `Core -> Repo guides -> Role YAML -> Limits`.
+- Orchestrator (`session.NewSession` with `orchestratorSystemPrompt`): `Router prompt -> Limits` only (zero tools).
+
+`AGENTS.md` is kept on disk for IDE rules and automatic sensors (`## Verification Commands`), and intentionally excluded from `config/guides.toml` so agents do not pay a per-turn token tax re-reading directory maps and roadmaps.
 
 ## Principles used
 
-1. **Minimal but complete** — sections with clear headers; avoid laundry lists of edge cases ([Anthropic context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)).
-2. **Verify → act → re-verify** — gather ground truth before edits; re-run tests after ([AgentsCamp patterns](https://agentscamp.com/guides/prompting/prompt-patterns)).
-3. **Tool-first** — dedicated tools over shell; parallel independent reads ([OpenAI Codex prompting guide](https://github.com/openai/openai-cookbook/blob/main/examples/gpt-5/codex_prompting_guide.ipynb)).
-4. **Tone matching** — short user messages → short replies; no unsolicited onboarding.
-5. **Few-shot shape** — canonical examples in `repl_guide.md` instead of vague adjectives.
-
-## Iterating
-
-1. Start simple; add rules only for **observed** failures (ratchet principle in `docs/HARNESS_PLAYBOOK.md`).
-2. After a bad run, check `.mobius/events/<thread>.jsonl` and add one line to `repl_guide.md` or a sensor — not a paragraph in the system prompt.
-3. Keep `## Verification Commands` in the project's `AGENTS.md` so sensors stay accurate. Point Mobius at that project with a path.
+1. **Minimal non-overlapping rules** — keep total instruction count low (curse of instructions / IFScale) and avoid duplicating base rules inside roles or guides.
+2. **Macro XML + micro Markdown** — XML boundaries (`<grounding>`, `<workflow>`, `<tools>`, `<safety>`, `<role_instructions>`, `<user_message>`) strengthen adherence and prompt-injection isolation across model families.
+3. **Grounding & causal proof** — read before referencing/editing, never claim verification without running it, and require `path:line` + failure trigger in code reviews (OpenAI Codex `review_prompt.md` pattern).
+4. **Self-contained handoffs & anti-loop recovery** — orchestrator writes standalone briefs for isolated workers; workers change hypothesis on errors and stop/report after repeated failures (MAST multi-agent taxonomy).
+5. **Ratchet on observed failures** — add rules only for observed failure traces in `.mobius/events/<thread>.jsonl`, not speculative edge cases.

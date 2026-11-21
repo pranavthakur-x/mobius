@@ -1,17 +1,18 @@
 # config/guides.toml
 #
-# Guide files injected into the Mobius CLI system prompt (not Cursor IDE rules).
-# Higher priority numbers are appended **last** so they win on conflicts.
-
-[[candidates]]
-path = "AGENTS.md"
-priority = 40
+# Guide files injected into the Mobius system prompt.
+# Higher priority numbers are appended last so they win on conflicts.
+#
+# Keep injected guides strictly to non-discoverable repo rules (verification
+# commands, style invariants, landmines). AGENTS.md is intentionally excluded
+# here to avoid injecting directory maps and milestone roadmaps on every turn;
+# automatic sensors still read AGENTS.md directly for verification commands.
 
 [[candidates]]
 path = "config/repl_guide.md"
 priority = 100
 
-# Optional extras (ignored if missing):
+# Optional local overrides (ignored if missing):
 [[candidates]]
 path = "INTERNAL_RULES.md"
 priority = 90

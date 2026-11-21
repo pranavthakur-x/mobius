@@ -16,14 +16,17 @@ func (w *Workspace) Handle(ctx context.Context, input string, mode DispatchMode)
 }
 
 func (w *Workspace) rememberTurn(user, assistant string) {
-	if w.orchestrator == nil || w.orchestrator.Context == nil {
-		return
-	}
 	if strings.TrimSpace(user) != "" {
-		w.orchestrator.Context.AddUserMessage(user)
+		if w.orchestrator != nil && w.orchestrator.Context != nil {
+			w.orchestrator.Context.AddUserMessage(user)
+		}
+		w.recordRecent("user", user)
 	}
 	if strings.TrimSpace(assistant) != "" {
-		w.orchestrator.Context.AddAssistantMessage(assistant, nil)
+		if w.orchestrator != nil && w.orchestrator.Context != nil {
+			w.orchestrator.Context.AddAssistantMessage(assistant, nil)
+		}
+		w.recordRecent("orchestrator", assistant)
 	}
 }
 
@@ -142,6 +145,9 @@ func (w *Workspace) dispatchTask(ctx context.Context, teamID, roleID, task, ack 
 				break
 			}
 			continuation = true
+		}
+		if err == nil && strings.TrimSpace(answer) != "" {
+			w.recordRecent(teamID+"/"+roleID, answer)
 		}
 		return WorkerResult{Reply: answer, Err: err}
 	}

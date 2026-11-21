@@ -3,11 +3,18 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
+	"mobius/pkg/redact"
 	"mobius/pkg/roles"
 	"mobius/pkg/session"
 	"mobius/pkg/tools"
+)
+
+const (
+	maxRecentTurns = 8
+	maxRecentRunes = 320
 )
 
 // Workspace is an isolated per-chat orchestrator and team runtime.
@@ -19,6 +26,9 @@ type Workspace struct {
 	cancel       context.CancelFunc
 	model        ModelSpec
 	factory      AgentFactory
+
+	historyMu sync.Mutex
+	recent    []recentTurn
 }
 
 // WorkspaceRegistry maps chat/session ids to workspaces.
@@ -130,4 +140,47 @@ func (w *Workspace) Close() {
 	if w.cancel != nil {
 		w.cancel()
 	}
+}
+
+func (w *Workspace) recordRecent(role, content string) {
+	cleaned := strings.TrimSpace(redact.Redact(content))
+	if cleaned == "" {
+		return
+	}
+	cleaned = clipRunes(cleaned, maxRecentRunes)
+
+	w.historyMu.Lock()
+	defer w.historyMu.Unlock()
+	w.recent = append(w.recent, recentTurn{
+		Role:    role,
+		Content: cleaned,
+	})
+	if len(w.recent) > maxRecentTurns {
+		w.recent = append([]recentTurn(nil), w.recent[len(w.recent)-maxRecentTurns:]...)
+	}
+}
+
+func (w *Workspace) recentSnapshot() []recentTurn {
+	w.historyMu.Lock()
+	defer w.historyMu.Unlock()
+	if len(w.recent) == 0 {
+		return nil
+	}
+	out := make([]recentTurn, len(w.recent))
+	copy(out, w.recent)
+	return out
+}
+
+func clipRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return ""
+	}
+	n := 0
+	for i := range s {
+		if n == max {
+			return s[:i] + "…"
+		}
+		n++
+	}
+	return s
 }

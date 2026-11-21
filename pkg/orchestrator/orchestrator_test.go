@@ -612,6 +612,8 @@ func TestCatalogSnapshotRoundTrip(t *testing.T) {
 		"code_review",
 		"product",
 		"product_manager",
+		"Read-only code review",
+		"Clarify user problems",
 	} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("catalog missing %q: %s", want, data)
@@ -625,5 +627,205 @@ func TestAgentctxIsolation(t *testing.T) {
 	msgs := ctx.Messages()
 	if len(msgs) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+}
+
+func TestWorkerPromptLayersBaseAndRoleWhileOrchestratorStaysRouterOnly(t *testing.T) {
+	chdirModuleRoot(t)
+	ws := newTestWorkspace(t, &recordingProvider{})
+
+	orchSys := ws.OrchestratorSession().Context.Messages()[0].Content
+	if !strings.Contains(orchSys, "<routing_rules>") {
+		t.Fatalf("orchestrator system prompt missing routing rules: %s", orchSys)
+	}
+	if strings.Contains(orchSys, "<tools>") {
+		t.Fatalf("orchestrator prompt should not include worker tool rules: %s", orchSys)
+	}
+
+	se, ok := ws.manager.WorkerFor("engineering", "software_engineer")
+	if !ok {
+		t.Fatal("missing software_engineer worker")
+	}
+	seSys := se.Session.Context.Messages()[0].Content
+	for _, want := range []string{
+		"<identity>",
+		"<grounding>",
+		"<tools>",
+		"<role_instructions>",
+		"<role_persona>",
+		"Software Engineer",
+	} {
+		if !strings.Contains(seSys, want) {
+			t.Fatalf("worker prompt missing %q:\n%s", want, seSys)
+		}
+	}
+
+	snap := ws.manager.CatalogSnapshot()
+	var foundReview bool
+	for _, team := range snap.Teams {
+		for _, r := range team.Roles {
+			if r.ID == "code_review" {
+				foundReview = true
+				if len(r.Tools) == 0 {
+					t.Fatal("expected catalog role tools to be populated")
+				}
+				r.Tools[0] = "mutated"
+			}
+		}
+	}
+	if !foundReview {
+		t.Fatal("missing code_review in catalog snapshot")
+	}
+	snap2 := ws.manager.CatalogSnapshot()
+	for _, team := range snap2.Teams {
+		for _, r := range team.Roles {
+			if r.ID == "code_review" && r.Tools[0] == "mutated" {
+				t.Fatal("mutating CatalogSnapshot tools leaked into manager state")
+			}
+		}
+	}
+}
+
+func TestReloadRolesPreservesUnchangedAndRebuildsChanged(t *testing.T) {
+	chdirModuleRoot(t)
+	dir := t.TempDir()
+	writeRoleFixture := func(sys, toolsYAML string) {
+		if err := os.MkdirAll(filepath.Join(dir, "departments"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "software_engineer.yml"), []byte(
+			"id: software_engineer\nname: Software Engineer\ndepartment: engineering\nsystem: |\n  "+sys+"\ntools:\n"+toolsYAML,
+		), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "departments", "engineering.yml"), []byte(
+			"id: engineering\nname: Engineering\nroles:\n  - software_engineer\ndefault_lead: software_engineer\n",
+		), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeRoleFixture("Version one.", "  - view_file\n")
+	store, err := roles.Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &recordingProvider{}
+	base := tools.NewDefaultRegistry(".")
+	model := ModelSpec{Name: "test-model", Provider: provider, PromptPrice: 1, CompletionPrice: 1}
+	ws, err := NewWorkspace(context.Background(), "chat-reload", store, base, model, testFactory(provider))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+
+	before, _ := ws.manager.WorkerFor("engineering", "software_engineer")
+	beforeThread := before.Session.Agent.ThreadID()
+
+	if err := ws.manager.ReloadRoles(context.Background()); err != nil {
+		t.Fatalf("unchanged ReloadRoles: %v", err)
+	}
+	same, _ := ws.manager.WorkerFor("engineering", "software_engineer")
+	if same.Session.Agent.ThreadID() != beforeThread {
+		t.Fatal("unchanged role should keep its existing session")
+	}
+
+	writeRoleFixture("Version two.", "  - view_file\n  - grep_search\n")
+	if err := ws.manager.ReloadRoles(context.Background()); err != nil {
+		t.Fatalf("changed ReloadRoles: %v", err)
+	}
+	after, _ := ws.manager.WorkerFor("engineering", "software_engineer")
+	if after.Session.Agent.ThreadID() == beforeThread {
+		t.Fatal("changed role should rebuild worker session")
+	}
+	afterSys := after.Session.Context.Messages()[0].Content
+	if !strings.Contains(afterSys, "Version two.") || !strings.Contains(afterSys, "<identity>") {
+		t.Fatalf("rebuilt worker missing layered prompt:\n%s", afterSys)
+	}
+}
+
+func TestDecideIncludesBoundedRedactedRecentTurnsOnFollowUp(t *testing.T) {
+	chdirModuleRoot(t)
+	provider := &recordingProvider{
+		replies: []string{
+			`{"think":"review","action":"delegate","reply":"","team_id":"engineering","role_id":"code_review","task":"Review pkg/roles"}`,
+			"",
+			`{"think":"follow-up","action":"reply","reply":"done","team_id":"","role_id":"","task":""}`,
+		},
+	}
+	ws := newTestWorkspace(t, provider)
+	ctx := context.Background()
+
+	// Turn 1: should have no <recent_turns> yet.
+	if _, err := ws.Handle(ctx, "review pkg/roles with token sk-secret1234567890", DispatchSync); err != nil {
+		t.Fatalf("turn 1 Handle: %v", err)
+	}
+	provider.mu.Lock()
+	var turn1Req *llm.ChatRequest
+	for _, r := range provider.requests {
+		if len(r.Tools) == 0 {
+			turn1Req = r
+			break
+		}
+	}
+	provider.mu.Unlock()
+	if turn1Req == nil {
+		t.Fatal("missing turn 1 orchestrator request")
+	}
+	if strings.Contains(turn1Req.Message[1].Content, "<recent_turns>") {
+		t.Fatalf("turn 1 should omit empty <recent_turns>: %s", turn1Req.Message[1].Content)
+	}
+
+	// Turn 2: follow-up should include <recent_turns> with redacted prior turn and worker summary.
+	res2, err := ws.Handle(ctx, "now fix the second issue", DispatchSync)
+	if err != nil {
+		t.Fatalf("turn 2 Handle: %v", err)
+	}
+	if res2.Reply != "done" {
+		t.Fatalf("unexpected turn 2 reply: %q", res2.Reply)
+	}
+	turn2Req := provider.lastRequest()
+	if turn2Req == nil || len(turn2Req.Tools) != 0 {
+		t.Fatalf("expected turn 2 orchestrator request, got %+v", turn2Req)
+	}
+	if strings.Contains(turn2Req.Message[0].Content, "review pkg/roles") {
+		t.Fatal("recent turns must never leak into system message")
+	}
+	userBody := turn2Req.Message[1].Content
+	if !strings.Contains(userBody, "<recent_turns>") {
+		t.Fatalf("turn 2 missing <recent_turns>: %s", userBody)
+	}
+	if strings.Contains(userBody, "sk-secret1234567890") {
+		t.Fatalf("secret leaked into <recent_turns>: %s", userBody)
+	}
+	if !strings.Contains(userBody, "[REDACTED]") {
+		t.Fatalf("expected redacted placeholder in <recent_turns>: %s", userBody)
+	}
+	if !strings.Contains(userBody, "engineering/code_review") || !strings.Contains(userBody, "worker-finished") {
+		t.Fatalf("expected completed worker outcome in <recent_turns>: %s", userBody)
+	}
+
+	// Verify bounding on count and rune length under concurrent writes.
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				ws.recordRecent("user", strings.Repeat("a", maxRecentRunes+100))
+				_ = ws.recentSnapshot()
+			}
+		}()
+	}
+	wg.Wait()
+
+	snap := ws.recentSnapshot()
+	if len(snap) > maxRecentTurns {
+		t.Fatalf("recent turns exceeded cap: %d > %d", len(snap), maxRecentTurns)
+	}
+	for _, entry := range snap {
+		if len([]rune(entry.Content)) > maxRecentRunes+1 {
+			t.Fatalf("recent entry exceeded rune cap: %d", len([]rune(entry.Content)))
+		}
 	}
 }

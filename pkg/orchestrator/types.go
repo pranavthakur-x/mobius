@@ -62,10 +62,13 @@ type DispatchResult struct {
 
 // Worker is one role agent bound to a team.
 type Worker struct {
-	RoleID  string
-	TeamID  string
-	Name    string
-	Session *session.Session
+	RoleID      string
+	TeamID      string
+	Name        string
+	Session     *session.Session
+	description string
+	roleSystem  string
+	tools       []string
 }
 
 // Team groups workers for one department instance in a chat.
@@ -84,11 +87,20 @@ type claimKey struct {
 	roleID string
 }
 
+// recentTurn is one bounded, redacted routing-history entry passed to Decide
+// so follow-up user messages resolve cleanly without replaying full transcripts.
+type recentTurn struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // CatalogRole is one role entry in the routing catalog JSON.
 type CatalogRole struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Busy bool   `json:"busy"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Tools       []string `json:"tools,omitempty"`
+	Busy        bool     `json:"busy"`
 }
 
 // CatalogTeam is one team entry in the routing catalog JSON.

@@ -18,31 +18,34 @@ type Result struct {
 }
 
 // Intercept processes tool output and decides whether to offload.
+// view_file, list_dir, and grep_search stay in context: they are already
+// capped by the tools themselves, and offloading them made the model
+// re-read the same files with run_command because read_artifact does not exist.
 func Intercept(store *Store, threadID, toolName, fullOutput string) Result {
-	size := len(fullOutput)
-
-	// Small output: keep everything in context
-	if size <= SmallThreshold {
+	if keepToolOutputInContext(toolName) || len(fullOutput) <= SmallThreshold {
 		return Result{
 			Observation: fullOutput,
 			FullOutput:  fullOutput,
 		}
 	}
 
-	// Medium or large: offload to artifact store
-	_, ref, err := store.Save(threadID, fullOutput)
-	if err != nil {
-		// Fallback: truncate if artifact save fails
+	if store == nil {
 		return Result{
-			Observation: fullOutput[:SmallThreshold] + "\n... [truncated]",
+			Observation: clipString(fullOutput, SmallThreshold) + "\n... [truncated]",
 			FullOutput:  fullOutput,
 		}
 	}
 
-	// Build a preview (first N lines)
-	preview := buildPreview(fullOutput, PreviewLines)
+	_, ref, err := store.Save(threadID, fullOutput)
+	if err != nil {
+		return Result{
+			Observation: clipString(fullOutput, SmallThreshold) + "\n... [truncated]",
+			FullOutput:  fullOutput,
+		}
+	}
 
-	observation := fmt.Sprintf("Output saved to %s (%d bytes).\nPreview:\n%s\nUse read_artifact for full content.", ref, size, preview)
+	preview := buildPreview(fullOutput, PreviewLines)
+	observation := fmt.Sprintf("Output saved to %s (%d bytes).\nPreview:\n%s\nThis output is too large for context. Call the same tool again with a narrower path, pattern, or command. Do not use run_command to cat this artifact.", ref, len(fullOutput), preview)
 
 	return Result{
 		Observation:  observation,
@@ -50,6 +53,29 @@ func Intercept(store *Store, threadID, toolName, fullOutput string) Result {
 		ArtifactRef:  ref,
 		WasOffloaded: true,
 	}
+}
+
+func keepToolOutputInContext(toolName string) bool {
+	switch toolName {
+	case "view_file", "list_dir", "grep_search":
+		return true
+	default:
+		return false
+	}
+}
+
+func clipString(s string, maxRunes int) string {
+	if maxRunes <= 0 || s == "" {
+		return ""
+	}
+	n := 0
+	for i := range s {
+		if n == maxRunes {
+			return s[:i]
+		}
+		n++
+	}
+	return s
 }
 
 func buildPreview(content string, maxLines int) string {

@@ -35,11 +35,12 @@ var (
 )
 
 type roleFile struct {
-	ID         string   `yaml:"id"`
-	Name       string   `yaml:"name"`
-	Department string   `yaml:"department"`
-	System     string   `yaml:"system"`
-	Tools      []string `yaml:"tools"`
+	ID          string   `yaml:"id"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Department  string   `yaml:"department"`
+	System      string   `yaml:"system"`
+	Tools       []string `yaml:"tools"`
 }
 
 type departmentFile struct {
@@ -296,6 +297,10 @@ func validateRole(file roleFile) (Role, error) {
 	if err != nil {
 		return Role{}, fmt.Errorf("role %s: %w", file.ID, err)
 	}
+	description, err := cleanOptionalDescription(file.Description)
+	if err != nil {
+		return Role{}, fmt.Errorf("role %s: %w", file.ID, err)
+	}
 	if !ValidID(file.Department) {
 		return Role{}, fmt.Errorf("role %s: %w: %q", file.ID, ErrInvalidID, file.Department)
 	}
@@ -318,11 +323,12 @@ func validateRole(file roleFile) (Role, error) {
 		tools = append(tools, tool)
 	}
 	return Role{
-		ID:         file.ID,
-		Name:       name,
-		Department: file.Department,
-		System:     file.System,
-		Tools:      tools,
+		ID:          file.ID,
+		Name:        name,
+		Description: description,
+		Department:  file.Department,
+		System:      file.System,
+		Tools:       tools,
 	}, nil
 }
 
@@ -381,6 +387,26 @@ func cleanDisplayName(name string) (string, error) {
 	for _, r := range trimmed {
 		if r == '\n' || r == '\r' || unicode.IsControl(r) {
 			return "", fmt.Errorf("name contains a control character")
+		}
+	}
+	return trimmed, nil
+}
+
+const maxDescriptionRunes = 240
+
+func cleanOptionalDescription(desc string) (string, error) {
+	trimmed := strings.TrimSpace(desc)
+	if trimmed == "" {
+		return "", nil
+	}
+	n := 0
+	for _, r := range trimmed {
+		if r == '\n' || r == '\r' || unicode.IsControl(r) {
+			return "", fmt.Errorf("description contains a control character")
+		}
+		n++
+		if n > maxDescriptionRunes {
+			return "", fmt.Errorf("description exceeds %d characters", maxDescriptionRunes)
 		}
 	}
 	return trimmed, nil

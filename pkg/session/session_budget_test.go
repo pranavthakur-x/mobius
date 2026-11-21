@@ -27,3 +27,28 @@ func TestSessionIncludesAgentBudget(t *testing.T) {
 		t.Fatalf("budget notice missing %q: %s", want, msgs[0].Content)
 	}
 }
+
+func TestNewRoleSessionComposesBaseGuidesAndRole(t *testing.T) {
+	chdirModuleRoot(t)
+	ag := newTestAgent(t)
+	steps, _, _ := ag.Limits()
+
+	sess := NewRoleSession("r1", "Code Review", ag, "<role_persona>Role: Code Reviewer</role_persona>")
+	msgs := sess.Context.Messages()
+	if len(msgs) == 0 {
+		t.Fatal("expected a system message")
+	}
+	sys := msgs[0].Content
+	for _, want := range []string{
+		"<identity>",
+		"<grounding>",
+		"<tools>",
+		"<role_instructions>",
+		"<role_persona>Role: Code Reviewer</role_persona>",
+		fmt.Sprintf("Hard stop from config/agent.toml: %d steps", steps),
+	} {
+		if !strings.Contains(sys, want) {
+			t.Fatalf("role session system prompt missing %q:\n%s", want, sys)
+		}
+	}
+}

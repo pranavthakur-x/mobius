@@ -23,18 +23,27 @@ type Session struct {
 }
 
 // NewSession initializes an agent session with its own memory context.
+// When systemPrompt is empty, it builds the default harness prompt plus workspace guides.
+// When non-empty, it uses systemPrompt verbatim (e.g. the zero-tool JSON orchestrator).
 func NewSession(id, name string, a *agent.Agent, systemPrompt ...string) *Session {
 	prompt := ""
 	if len(systemPrompt) > 0 {
 		prompt = systemPrompt[0]
 	}
 	if prompt == "" {
-		guidesPrompt := ""
-		if gs, err := guides.LoadFromWorkSpace("config/guides.toml", "."); err == nil {
-			guidesPrompt = gs.RenderSystemPrompt()
-		}
-		prompt = agentctx.BuildSystemPrompt("", guidesPrompt)
+		prompt = agentctx.BuildSystemPrompt("", loadWorkspaceGuides())
 	}
+	return newSessionWithPrompt(id, name, a, prompt)
+}
+
+// NewRoleSession initializes a role worker session by layering the core harness
+// prompt, workspace guides, the role's specialist instructions, and budget limits.
+func NewRoleSession(id, name string, a *agent.Agent, rolePrompt string) *Session {
+	prompt := agentctx.BuildRoleSystemPrompt(rolePrompt, loadWorkspaceGuides())
+	return newSessionWithPrompt(id, name, a, prompt)
+}
+
+func newSessionWithPrompt(id, name string, a *agent.Agent, prompt string) *Session {
 	prompt += budgetNotice(a)
 
 	convContext := agentctx.NewConversationContext(prompt)
@@ -47,6 +56,14 @@ func NewSession(id, name string, a *agent.Agent, systemPrompt ...string) *Sessio
 		CreatedAt: now,
 		updatedAt: now,
 	}
+}
+
+func loadWorkspaceGuides() string {
+	gs, err := guides.LoadFromWorkSpace("config/guides.toml", ".")
+	if err != nil {
+		return ""
+	}
+	return gs.RenderSystemPrompt()
 }
 
 func budgetNotice(a *agent.Agent) string {

@@ -41,7 +41,7 @@ func (g *GrepTool) Name() string {
 
 // Description returns a helpful summary of the tool for the LLM.
 func (g *GrepTool) Description() string {
-	return "Searches for a text pattern or regex across files in a directory."
+	return "Searches for a text pattern or regex across source files. Skips .git, .mobius, .cursor, node_modules, and vendor. Pass a narrower source path when you know it; do not search .mobius or old tool dumps."
 }
 
 // Schema returns the JSON schema parameter specification for grep_search.
@@ -55,7 +55,7 @@ func (g *GrepTool) Schema() ToolSchema {
 			},
 			"path": {
 				Type:        "string",
-				Description: "Optional relative directory to search within. Defaults to current directory.",
+				Description: "Optional relative source directory or file. Defaults to the workspace root. Do not pass .mobius or .git.",
 			},
 			"case_insensitive": {
 				Type:        "boolean",
@@ -88,6 +88,10 @@ func (g *GrepTool) Execute(ctx context.Context, jsonArgs string) (string, error)
 		targetDir = filepath.Join(g.workingDir, searchPath)
 	}
 
+	if skipped, name := skippedSearchDir(targetDir); skipped {
+		return fmt.Sprintf("Search skipped: %q is a telemetry/cache directory (%s). Search project source paths instead.", searchPath, name), nil
+	}
+
 	if args.CaseInsensitive {
 		pattern = "(?i)" + pattern
 	}
@@ -100,20 +104,16 @@ func (g *GrepTool) Execute(ctx context.Context, jsonArgs string) (string, error)
 	var results []string
 	maxResults := 50
 
-	ignoreDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		".agents":      true,
-		".gemini":      true,
-	}
-
 	err = filepath.WalkDir(targetDir, func(path string, d os.DirEntry, err error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err != nil {
 			return nil
 		}
 
 		if d.IsDir() {
-			if ignoreDirs[d.Name()] {
+			if skipSearchDirNames[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
@@ -162,4 +162,25 @@ func (g *GrepTool) Execute(ctx context.Context, jsonArgs string) (string, error)
 	}
 
 	return strings.Join(results, "\n"), nil
+}
+
+// skipSearchDirNames are directories grep_search never walks. .mobius holds
+// previous tool dumps; searching them makes every broad query look like a hit.
+var skipSearchDirNames = map[string]bool{
+	".git":         true,
+	".mobius":      true,
+	".cursor":      true,
+	".agents":      true,
+	".gemini":      true,
+	"node_modules": true,
+	"vendor":       true,
+}
+
+func skippedSearchDir(path string) (bool, string) {
+	for _, part := range strings.Split(filepath.ToSlash(filepath.Clean(path)), "/") {
+		if skipSearchDirNames[part] {
+			return true, part
+		}
+	}
+	return false, ""
 }
