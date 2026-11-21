@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
+// EventType identifies the kind of fact recorded in a session trajectory.
 type EventType string
 
+// Supported trajectory event types recorded by the agent runtime.
 const (
 	EventUserMessage      EventType = "user_message"
 	EventAssistantMessage EventType = "assistant_message"

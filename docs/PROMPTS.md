@@ -5,7 +5,7 @@ Prompts are split into non-overlapping layers so every token earns its slot and 
 | Layer | File | Role |
 |-------|------|------|
 | Core harness rules | `pkg/agentctx/prompt.go` | Grounding, workflow, tool discipline, error recovery, reversibility/safety, output shape |
-| Workspace guide | `config/repl_guide.md` (via `config/guides.toml`) | Stack-agnostic workspace conventions (native verification discovery, sensor compliance, style matching) |
+| Workspace guide | `config/repl_guide.md` (via `config/guides.toml`, `internal/guides`) | Stack-agnostic workspace conventions (native verification discovery, sensor compliance, style matching) |
 | Specialist roles | `roles/*.yml` | Role persona, craft methodology, and role-specific output contract |
 | Multi-agent router | `pkg/orchestrator/prompt.go` | Zero-tool JSON routing schema, untrusted-input boundary, self-contained worker briefs |
 | Execution limits | `pkg/session/session.go` | Step, USD cost, and timeout caps from `config/agent.toml` |

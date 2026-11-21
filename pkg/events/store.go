@@ -5,13 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mobius/pkg/utils"
+	"mobius/internal/id"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 )
 
+// FileEventStore persists session events as per-thread JSONL files using an
+// asynchronous background writer with synchronous fallback when buffered.
 type FileEventStore struct {
 	dir      string
 	eventsCh chan Event
@@ -20,6 +22,8 @@ type FileEventStore struct {
 	closed   bool
 }
 
+// NewFileEventStore creates a FileEventStore rooted at dir (default ".mobius/events")
+// with the specified async channel buffer size (default 256) and starts its worker.
 func NewFileEventStore(dir string, bufferSize int) (*FileEventStore, error) {
 	if dir == "" {
 		dir = ".mobius/events"
@@ -66,6 +70,7 @@ func (s *FileEventStore) worker() {
 	}
 }
 
+// Append records an event to the store, assigning an ID and UTC timestamp if unset.
 func (s *FileEventStore) Append(ctx context.Context, event Event) error {
 	s.mu.RLock()
 	if s.closed {
@@ -74,7 +79,7 @@ func (s *FileEventStore) Append(ctx context.Context, event Event) error {
 	}
 	s.mu.RUnlock()
 	if event.ID == "" {
-		event.ID = utils.NewEventID()
+		event.ID = id.NewEventID()
 	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now().UTC()
@@ -91,6 +96,7 @@ func (s *FileEventStore) Append(ctx context.Context, event Event) error {
 
 }
 
+// GetEvents reads and decodes all persisted events for threadID in order.
 func (s *FileEventStore) GetEvents(ctx context.Context, threadID string) ([]Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+// Run executes the multi-step ReAct loop for userInstruction against c,
+// enforcing step, cost, and timeout limits and returning the final assistant reply.
 func (a *Agent) Run(ctx context.Context, c *agentctx.ConversationContext, userInstruction string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
@@ -56,6 +58,7 @@ func (a *Agent) Run(ctx context.Context, c *agentctx.ConversationContext, userIn
 		provider := a.provider
 		sensorReg := a.sensorRegistry
 		tracker := a.tracker
+		streamHook := a.streamHook
 		a.mu.RUnlock()
 
 		req := &llm.ChatRequest{
@@ -64,7 +67,11 @@ func (a *Agent) Run(ctx context.Context, c *agentctx.ConversationContext, userIn
 			Tools:   a.toolDefs,
 		}
 
-		resp, err := provider.Generate(ctx, req)
+		var onStream llm.StreamCallback
+		if streamHook != nil {
+			onStream = llm.StreamCallback(streamHook)
+		}
+		resp, err := llm.GenerateWithStream(ctx, provider, req, onStream)
 		if err != nil {
 			return "", fmt.Errorf("step %d LLM call failed: %w", step, err)
 		}

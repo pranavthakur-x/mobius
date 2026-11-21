@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"mobius/pkg/redact"
+	"mobius/internal/redact"
 	"mobius/pkg/roles"
 	"mobius/pkg/session"
 	"mobius/pkg/tools"

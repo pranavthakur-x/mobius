@@ -19,7 +19,7 @@ This document tracks our progressive build of the **Go Agent Harness** and the G
   - [x] Provider interface & message schema (`pkg/llm/types.go`)
   - [x] OpenAI / DeepSeek / Ollama compatible adapter (`pkg/llm/openai.go`)
   - [x] Provider registry & factory (`pkg/llm/registry.go`, `pkg/llm/factory.go`)
-  - [x] Dynamic model switcher & interactive REPL menu (`pkg/cli/menu.go`, `/models`)
+  - [x] Dynamic model switcher & interactive REPL menu (`internal/cli/menu.go`, `/models`)
   - *Go Concepts Learned: `net/http`, JSON tags & marshaling, Type switches, Environment variables, Raw terminal I/O*
 
 - [x] **Milestone 3: Agent Runtime Loop & Context Engine**
@@ -28,8 +28,8 @@ This document tracks our progressive build of the **Go Agent Harness** and the G
   - [x] Token estimation & 80% watermark trigger (`pkg/agentctx/token.go`)
   - [x] 8-section checkpoint summarizer & KV-cache reuse (`pkg/agentctx/summarizer.go`)
   - [x] Safe cut-point & tool-pairing integrity compactor (`pkg/agentctx/compactor.go`)
-  - [x] Observation interceptor & artifact store (`pkg/artifact/`)
-  - [x] Dynamic pricing & live USD/INR budget tracker (`pkg/budget/tracker.go`)
+  - [x] Observation interceptor & artifact store (`internal/artifact/`)
+  - [x] Dynamic pricing & live USD/INR budget tracker (`internal/budget/tracker.go`)
   - [x] Structured append-only JSONL EventStore (`pkg/events/store.go`)
   - *Go Concepts Learned: `context.Context` (timeouts & cancellation), Slices & memory layout, String/Rune metrics, State machines*
 

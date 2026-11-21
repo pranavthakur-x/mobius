@@ -49,6 +49,7 @@ type FunctionDef struct {
 	Parameters  interface{} `json:"parameters"`
 }
 
+// ToolDefinition describes a callable tool exposed to the model.
 type ToolDefinition struct {
 	Type     string      `json:"type"` // "function"
 	Function FunctionDef `json:"function"`
@@ -68,6 +69,16 @@ type ChatResponse struct {
 	Usage     Usage      `json:"usage"` // <-- Add the Usage struct here
 }
 
+// StreamEvent carries one incremental update emitted while an LLM streams a response.
+type StreamEvent struct {
+	TextDelta string
+	ToolName  string
+	ToolID    string
+}
+
+// StreamCallback receives incremental deltas during a streaming LLM call.
+type StreamCallback func(StreamEvent)
+
 // Provider is the common interface implemented by all LLM client adapters (OpenAI, DeepSeek, Claude, Gemini, etc.).
 type Provider interface {
 	// Name returns the provider identifier (e.g. "openai", "anthropic", "gemini").
@@ -75,4 +86,20 @@ type Provider interface {
 
 	// Generate sends a chat completion request to the LLM and returns the generated response.
 	Generate(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
+}
+
+// StreamingProvider is optionally implemented by providers that support SSE token streaming.
+type StreamingProvider interface {
+	GenerateStream(ctx context.Context, req *ChatRequest, onEvent StreamCallback) (*ChatResponse, error)
+}
+
+// GenerateWithStream uses SSE streaming when the provider supports it and onEvent is non-nil,
+// otherwise falling back cleanly to Provider.Generate.
+func GenerateWithStream(ctx context.Context, p Provider, req *ChatRequest, onEvent StreamCallback) (*ChatResponse, error) {
+	if onEvent != nil {
+		if sp, ok := p.(StreamingProvider); ok {
+			return sp.GenerateStream(ctx, req, onEvent)
+		}
+	}
+	return p.Generate(ctx, req)
 }

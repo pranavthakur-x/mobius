@@ -33,12 +33,14 @@ type Config struct {
 	saved  []Connection
 }
 
+// ModelInfo describes a model and its backing provider endpoint.
 type ModelInfo struct {
 	ProviderName string
 	Model        string
 	BaseURL      string
 }
 
+// GetPrices returns the configured prompt and completion prices per unit for modelName.
 func (c *Config) GetPrices(modelName string) (float64, float64) {
 	if c == nil {
 		return 0, 0

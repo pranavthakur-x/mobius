@@ -2,9 +2,9 @@ package session
 
 import (
 	"fmt"
+	"mobius/internal/guides"
 	"mobius/pkg/agent"
 	"mobius/pkg/agentctx"
-	"mobius/pkg/guides"
 	"sync"
 	"time"
 )

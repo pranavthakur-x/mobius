@@ -49,8 +49,31 @@ func (w *Workspace) Decide(ctx context.Context, userText string) (Decision, erro
 		w.orchestrator.Agent.RecordUsage(resp.Usage)
 	}
 	dec, err := parseDecisionPayload(resp.Content)
-	if err != nil {
-		return Decision{}, err
+	if err == nil {
+		if err := validateDecision(dec, w.manager); err != nil {
+			return Decision{}, err
+		}
+		return dec, nil
+	}
+
+	repairReq := &llm.ChatRequest{
+		Model: w.model.Name,
+		Message: append(append([]llm.Message(nil), req.Message...),
+			llm.Message{Role: llm.RoleAssistant, Content: resp.Content},
+			llm.Message{Role: llm.RoleUser, Content: orchestratorRepairPrompt},
+		),
+		Tools: nil,
+	}
+	resp2, err2 := w.model.Provider.Generate(ctx, repairReq)
+	if err2 != nil {
+		return Decision{}, fmt.Errorf("%w (repair call failed: %v)", err, err2)
+	}
+	if w.orchestrator != nil && w.orchestrator.Agent != nil {
+		w.orchestrator.Agent.RecordUsage(resp2.Usage)
+	}
+	dec, err2 = parseDecisionPayload(resp2.Content)
+	if err2 != nil {
+		return Decision{}, fmt.Errorf("%w (after repair attempt)", err)
 	}
 	if err := validateDecision(dec, w.manager); err != nil {
 		return Decision{}, err
@@ -58,10 +81,20 @@ func (w *Workspace) Decide(ctx context.Context, userText string) (Decision, erro
 	return dec, nil
 }
 
+const orchestratorRepairPrompt = `Your previous response was not valid routing JSON. Respond with ONLY one JSON object (no prose) containing exactly these 6 string keys once each: think, action, reply, team_id, role_id, task.`
+
 func parseDecisionPayload(raw string) (Decision, error) {
-	body, err := stripOuterFence(strings.TrimSpace(raw))
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return Decision{}, fmt.Errorf("invalid routing JSON: orchestrator returned empty content")
+	}
+	body, err := stripOuterFence(raw)
 	if err != nil {
 		return Decision{}, err
+	}
+	body = strings.TrimSpace(extractJSONObject(body))
+	if body == "" || !strings.HasPrefix(body, "{") {
+		return Decision{}, fmt.Errorf("invalid routing JSON: no JSON object found in orchestrator response")
 	}
 	var m map[string]string
 	dec := json.NewDecoder(strings.NewReader(body))
@@ -118,6 +151,47 @@ func stripOuterFence(s string) (string, error) {
 		return "", fmt.Errorf("empty fenced payload")
 	}
 	return inner, nil
+}
+
+// extractJSONObject pulls the first balanced {...} object from prose or partial output.
+func extractJSONObject(s string) string {
+	s = strings.TrimSpace(s)
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return s
+	}
+	depth := 0
+	inString := false
+	escape := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escape {
+				escape = false
+				continue
+			}
+			if c == '\\' {
+				escape = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return strings.TrimSpace(s)
 }
 
 func validateDecision(d Decision, mgr *Manager) error {

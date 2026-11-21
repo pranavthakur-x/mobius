@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"mobius/internal/artifact"
 	"mobius/pkg/agentctx"
-	"mobius/pkg/artifact"
 	"mobius/pkg/events"
 	"mobius/pkg/llm"
 	"sync"

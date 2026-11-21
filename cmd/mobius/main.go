@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"mobius/internal/cli"
 	"mobius/pkg/agent"
-	"mobius/pkg/cli"
 	"mobius/pkg/events"
 	"mobius/pkg/llm"
 	"mobius/pkg/orchestrator"

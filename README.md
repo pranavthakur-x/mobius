@@ -78,7 +78,7 @@ Use the fullscreen TUI in a terminal, or set `MOBIUS_PLAIN=1` for the plain REPL
   Persistent state:  .mobius/chats/  ·  .mobius/events/  ·  roles/  ·  config/
 ```
 
-The shared work directory is the only common worker surface: role conversations remain isolated. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/2026-11-21.md](docs/2026-11-21.md) for the routing and isolation model.
+The shared work directory is the only common worker surface: role conversations remain isolated. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/MULTI_AGENT.md](docs/MULTI_AGENT.md) for the routing and isolation model.
 
 ---
 
@@ -91,7 +91,7 @@ The shared work directory is the only common worker surface: role conversations 
 - Role YAML defines the system prompt and allow-listed tool set; unknown tools fail closed.
 - Workers retain their own context across tasks, but their transcripts are never automatically injected into another worker's prompt.
 
-### Interactive TUI (`pkg/cli/tui`)
+### Interactive TUI (`internal/tui`)
 
 - Fullscreen chat UI with footer menus for chats, models, APIs, teams, and the work path.
 - Live spend bar and optional context sidebar (`config/tui.toml`).
@@ -117,7 +117,7 @@ The shared work directory is the only common worker surface: role conversations 
 
 - Token estimator and 80% high-watermark compaction with tool-pair integrity and checkpoint summaries.
 
-### Artifacts & budget (`pkg/artifact`, `pkg/budget`)
+### Artifacts & budget (`internal/artifact`, `internal/budget`)
 
 - Large tool outputs offloaded to `.mobius/artifacts/`.
 - Live USD spend tracking and a hard `max_cost` ceiling.
@@ -132,26 +132,34 @@ The shared work directory is the only common worker surface: role conversations 
 
 ```text
 mobius/
+├── assets/                      # Brand and visual assets (mascot.png)
 ├── cmd/mobius/                  # CLI entrypoint
 ├── config/
 │   ├── agent.toml               # max_steps, max_cost, timeout (all agents)
 │   ├── model_config.toml        # Provider catalog & pricing
 │   └── tui.toml                 # Sidebar / trace UI flags
-├── roles/                       # Role YAML + departments/
-├── docs/                        # Architecture, roadmap, orchestration notes
-├── pkg/
-│   ├── agent/                   # ReAct loop
-│   ├── agentctx/                # Context compaction
+├── docs/                        # Architecture, style, multi-agent & prompt guides
+├── examples/                    # Runnable SDK & custom tool examples
+├── internal/                    # Private application runtime & terminal UI
 │   ├── artifact/                # Large-output offload
 │   ├── budget/                  # Cost accounting
-│   ├── cli/                     # Boot, REPL, TUI backend
+│   ├── cli/                     # Boot, REPL, runner helpers
+│   ├── guides/                  # Workspace guide loader
+│   ├── id/                      # Shared ID generators
+│   ├── redact/                  # Secret scrubbing
+│   └── tui/                     # Bubble Tea UI (+ theme/, markdown/)
+├── pkg/                         # Public Go SDK
+│   ├── agent/                   # ReAct loop
+│   ├── agentctx/                # Context compaction
 │   ├── events/                  # JSONL EventStore
 │   ├── llm/                     # Providers, connections, keystore
 │   ├── orchestrator/            # Workspace, teams, routing
-│   ├── redact/                  # Secret scrubbing
 │   ├── roles/                   # YAML loader & store
+│   ├── sensors/                 # Post-edit verification sensors
 │   ├── session/                 # Chats & sessions
 │   └── tools/                   # Tool registry
+├── roles/                       # Role YAML + departments/
+├── scripts/                     # Maintenance scripts
 ├── .github/workflows/ci.yml     # fmt, mod, vet, lint, race tests, build
 ├── Makefile
 └── README.md

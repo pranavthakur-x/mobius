@@ -8,17 +8,36 @@ This document details the architectural design, subsystem interaction, and dataf
 
 ```text
 mobius/
-├── pkg/
-│   ├── agent/       # State machine, step loop, budget enforcement
-│   ├── agentctx/    # Token sensor, 8-section checkpoint summarizer, compactor
-│   ├── artifact/    # Observation interceptor (>2k chars) & disk store
-│   ├── budget/      # Live pricing, prompt/completion metering, budget ceiling
-│   ├── cli/         # Interactive REPL, raw terminal menu & navigation
-│   ├── events/      # Append-only JSONL EventStore telemetry
-│   ├── llm/         # Multi-provider client adapters (OpenAI, DeepSeek, Claude)
-│   ├── session/     # Multi-session memory management
-│   ├── tools/       # Standardized tool registry (Bash, Edit, View, Write, List, Grep)
-│   └── utils/       # ID generators & shared utilities
+├── assets/                      # Brand and visual assets (mascot.png)
+├── cmd/mobius/                  # Thin CLI entrypoint
+├── config/                      # Agent, model, guide, and TUI TOML configs
+├── docs/                        # Architecture, style, prompts, and roadmap
+├── examples/
+│   ├── basic_agent/             # Minimal single-agent ReAct loop example
+│   ├── custom_tool/             # Example registering a custom Go tool
+│   └── guides_preview/          # Workspace guide loader & system prompt previewer
+├── internal/                    # Private application runtime & terminal UI
+│   ├── artifact/                # Observation interceptor (>2k chars) & disk store
+│   ├── budget/                  # Live pricing, prompt/completion metering, budget ceiling
+│   ├── cli/                     # Interactive REPL, TTY detection & runner helpers
+│   ├── guides/                  # Workspace guide loader & system prompt renderer
+│   ├── id/                      # Shared ID generators
+│   ├── redact/                  # Secret & credential scrubbing for logs and output
+│   └── tui/                     # Fullscreen Bubble Tea terminal UI
+│       ├── markdown/            # Terminal markdown renderer
+│       └── theme/               # Palette and Lipgloss styles
+├── pkg/                         # Public Go SDK packages
+│   ├── agent/                   # State machine, step loop, budget enforcement
+│   ├── agentctx/                # Token sensor, 8-section checkpoint summarizer, compactor
+│   ├── events/                  # Append-only JSONL EventStore telemetry
+│   ├── llm/                     # Multi-provider client adapters (OpenAI, DeepSeek, Claude)
+│   ├── orchestrator/            # Multi-agent team coordination & workspace scheduling
+│   ├── roles/                   # Drop-in YAML role & department loader and validator
+│   ├── sensors/                 # Environment & context sensors for agent turns
+│   ├── session/                 # Multi-session memory management
+│   └── tools/                   # Standardized tool registry (Bash, Edit, View, Write, List, Grep)
+├── roles/                       # Drop-in role & department YAML specifications
+└── scripts/                     # Build and maintenance scripts
 ```
 
 ---
@@ -68,7 +87,7 @@ The execution loop follows the Reason-Act-Observe state machine:
                                                 ▼
                                   ┌───────────────────────────┐
                                   │  6. Artifact Interceptor  │
-                                  │     (pkg/artifact)        │
+                                  │     (internal/artifact)   │
                                   └─────────────┬─────────────┘
                                                 │
                                                 ▼
@@ -104,14 +123,14 @@ The execution loop follows the Reason-Act-Observe state machine:
 
 ---
 
-## 4. Artifact Interception & Offloading (`pkg/artifact`)
+## 4. Artifact Interception & Offloading (`internal/artifact`)
 
 * **Threshold Trigger**: Tool observations exceeding `SmallThreshold` (2,000 characters) are automatically stored on disk in `.mobius/artifacts/<thread_id>/`.
 * **Context Preservation**: The model receives a preview (first 20 lines) and an `artifact://` reference pointer, preventing context bloat from commands like `git diff` or large file dumps.
 
 ---
 
-## 5. Budget & Cost Enforcement (`pkg/budget`)
+## 5. Budget & Cost Enforcement (`internal/budget`)
 
 * Calculates exact USD and INR costs based on model-specific prompt and completion pricing per million tokens.
 * Aborts immediately if cumulative spend crosses `MaxCost` configured in `agent.toml`.

@@ -3,14 +3,14 @@ package agent
 import (
 	"context"
 	"fmt"
+	"mobius/internal/artifact"
+	"mobius/internal/budget"
+	"mobius/internal/id"
 	"mobius/pkg/agentctx"
-	"mobius/pkg/artifact"
-	"mobius/pkg/budget"
 	"mobius/pkg/events"
 	"mobius/pkg/llm"
 	"mobius/pkg/sensors"
 	"mobius/pkg/tools"
-	"mobius/pkg/utils"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +19,13 @@ import (
 // LineHook receives formatted status lines for the REPL (default: fmt.Print).
 type LineHook func(text string)
 
+// StreamHook receives incremental LLM output deltas (tokens and tool-call starts).
+type StreamHook func(ev llm.StreamEvent)
+
 func defaultLineHook(text string) { fmt.Print(text) }
 
+// Agent executes multi-turn ReAct conversations with tool execution, budget
+// tracking, context compaction, event recording, and sensor verification.
 type Agent struct {
 	mu sync.RWMutex
 
@@ -35,6 +40,7 @@ type Agent struct {
 	toolDefs       []llm.ToolDefinition
 	tracker        budget.CostTracker
 	lineHook       LineHook
+	streamHook     StreamHook
 	events         events.EventStore // EventStore
 	artifactStore  *artifact.Store
 	compactor      *agentctx.Compactor
@@ -43,6 +49,8 @@ type Agent struct {
 	notes   []string
 }
 
+// NewAgent constructs an Agent configured from agent.toml with the provided LLM
+// provider, tool registry, model name, token pricing, and optional event store.
 func NewAgent(provider llm.Provider, registry *tools.Registry, model string, pricePrompt float64, priceComp float64, eventStore events.EventStore) (*Agent, error) {
 
 	// 1. Validate required core components
@@ -96,7 +104,7 @@ func NewAgent(provider llm.Provider, registry *tools.Registry, model string, pri
 	budgetTracker := budget.NewTracker(agentCfg.MaxCost, pricePrompt, priceComp)
 
 	agent := &Agent{
-		threadID:      utils.NewThreadID(),
+		threadID:      id.NewThreadID(),
 		provider:      provider,
 		registry:      registry,
 		model:         model,
@@ -135,10 +143,20 @@ func (a *Agent) SetLineHook(hook LineHook) {
 	}
 }
 
+// SetStreamHook sets the optional incremental token/tool stream callback.
+// Passing nil disables live token streaming callbacks.
+func (a *Agent) SetStreamHook(hook StreamHook) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.streamHook = hook
+}
+
+// Events returns the event store attached to this agent, or nil if unset.
 func (a *Agent) Events() events.EventStore {
 	return a.events
 }
 
+// ThreadID returns the unique thread identifier assigned to this agent.
 func (a *Agent) ThreadID() string {
 	return a.threadID
 }
@@ -208,12 +226,14 @@ func (a *Agent) GenerateTitle(ctx context.Context, prompt string) string {
 	return strings.TrimSpace(resp.Content)
 }
 
+// GetModel returns the name of the active LLM model.
 func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.model
 }
 
+// SetModel updates the active model, provider, token pricing, and compactor target.
 func (a *Agent) SetModel(model string, provider llm.Provider, pricePrompt, priceComp float64) {
 	a.mu.Lock()
 	a.model = model
@@ -230,12 +250,14 @@ func (a *Agent) SetModel(model string, provider llm.Provider, pricePrompt, price
 	}
 }
 
+// SetSensors attaches a verification sensor registry used after file edits.
 func (a *Agent) SetSensors(sr *sensors.Registry) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sensorRegistry = sr
 }
 
+// Sensors returns the attached verification sensor registry, or nil if unset.
 func (a *Agent) Sensors() *sensors.Registry {
 	a.mu.RLock()
 	defer a.mu.RUnlock()

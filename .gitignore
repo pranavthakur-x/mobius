@@ -43,6 +43,7 @@ coverage.out
 !docs/*.md
 !docs/**/*.md
 !.github/**/*.md
+!config/repl_guide.md
 
 # ==============================================================================
 # Editor & OS Metadata / Local Agent Configs
