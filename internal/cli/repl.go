@@ -114,6 +114,8 @@ func StartREPL(app *App) {
 		}
 
 		switch input {
+		case "/help":
+			fmt.Println(orchestrator.HelpText())
 		case "/exit":
 			fmt.Println("Goodbye!")
 			return

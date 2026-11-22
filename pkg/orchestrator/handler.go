@@ -34,6 +34,8 @@ func (w *Workspace) route(ctx context.Context, input string, mode DispatchMode) 
 	pc := parseInput(input, w.manager)
 
 	switch pc.kind {
+	case cmdHelp:
+		return DispatchResult{Kind: KindCommand, Reply: HelpText()}, nil
 	case cmdTeams:
 		return DispatchResult{Kind: KindCommand, Reply: w.manager.FormatTeamsList()}, nil
 	case cmdReloadRoles:
@@ -128,6 +130,13 @@ func (w *Workspace) dispatchTask(ctx context.Context, teamID, roleID, task, ack 
 	}
 
 	run := func() WorkerResult {
+		runCtx, cancelRun := context.WithCancel(w.ctx)
+		stopWatch := context.AfterFunc(ctx, cancelRun)
+		defer func() {
+			stopWatch()
+			cancelRun()
+		}()
+
 		var answer string
 		var err error
 		userMsg := w.manager.TaskUserContent(teamID, task)
@@ -137,8 +146,9 @@ func (w *Workspace) dispatchTask(ctx context.Context, teamID, roleID, task, ack 
 			if continuation {
 				instruction = ""
 			}
-			answer, err = worker.Session.Agent.Run(w.ctx, worker.Session.Context, instruction)
+			answer, err = worker.Session.Agent.Run(runCtx, worker.Session.Context, instruction)
 			if err != nil {
+				w.manager.Release(teamID, roleID)
 				break
 			}
 			if w.manager.FinishWorkerRun(teamID, roleID, worker.Session.Agent) {

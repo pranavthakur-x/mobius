@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"mobius/pkg/orchestrator"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -23,6 +25,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "ctrl+c":
+		if m.inFlight || m.routing {
+			m.cancelActiveTurn()
+			return m, nil
+		}
 		m.Shutdown()
 		return m, tea.Quit
 	case "ctrl+o":
@@ -231,6 +237,12 @@ func (m *Model) handleMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.activateMenu()
 	default:
+		if m.menu == MenuActions && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+			m.menu = MenuNone
+			m.draft += "/" + string(msg.Runes[0])
+			m.updateComposeLines()
+			return m, nil
+		}
 		if m.menu == MenuRoles && msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
 			m.menu = MenuNone
 			m.draft += MentionFallback(msg.Runes[0])
@@ -294,6 +306,16 @@ func (m *Model) activateMenu() (tea.Model, tea.Cmd) {
 			m.workPathOn = true
 			m.workPathDraft = ""
 			m.workPathErr = ""
+			return m, nil
+		case ActionHelp:
+			m.menu = MenuNone
+			buf := m.store.Buffer(m.chatID)
+			runID := buf.BeginRun()
+			buf.ApplyLiveEvent(FinalReplyEvent{
+				SourceRef: SourceRef{ChatID: m.chatID, Name: "mobius", Kind: SourceOrchestrator},
+				Text:      orchestrator.HelpText(),
+				RunID:     runID,
+			}, m.settings)
 			return m, nil
 		}
 	case MenuModels:
@@ -380,18 +402,22 @@ func (m *Model) submit() (tea.Model, tea.Cmd) {
 	m.vp.PinBottom()
 	buf.AutoFollow = true
 	if strings.HasPrefix(text, "/") {
-		m.handleSlash(text)
-		return m, nil
+		return m.handleSlash(text, runID)
 	}
+	m.clearTurn()
+	turnCtx, turnCancel := context.WithCancel(m.ctx)
+	m.turnCancel = turnCancel
+	m.turnCanceled = false
+	m.inFlight = true
 	m.routing = true
-	return m, m.dispatchAsync(text, runID)
+	return m, m.dispatchAsync(turnCtx, text, runID)
 }
 
-func (m *Model) dispatchAsync(text, runID string) tea.Cmd {
+func (m *Model) dispatchAsync(turnCtx context.Context, text, runID string) tea.Cmd {
 	backend := m.backend
 	chatID := m.chatID
 	return func() tea.Msg {
-		handle, err := backend.Dispatch(context.Background(), chatID, text, runID)
+		handle, err := backend.Dispatch(turnCtx, chatID, text, runID)
 		if err != nil {
 			return dispatchDoneMsg{handle: DispatchHandle{ChatID: chatID, RunID: runID}, done: DispatchDone{Err: err}}
 		}
@@ -402,11 +428,18 @@ func (m *Model) dispatchAsync(text, runID string) tea.Cmd {
 	}
 }
 
-func (m *Model) handleSlash(cmd string) {
-	switch cmd {
+func (m *Model) handleSlash(cmd, runID string) (tea.Model, tea.Cmd) {
+	switch strings.ToLower(strings.TrimSpace(cmd)) {
+	case "/help":
+		m.store.Buffer(m.chatID).ApplyLiveEvent(FinalReplyEvent{
+			SourceRef: SourceRef{ChatID: m.chatID, Name: "mobius", Kind: SourceOrchestrator},
+			Text:      orchestrator.HelpText(),
+			RunID:     runID,
+		}, m.settings)
+		return m, nil
 	case "/exit":
 		m.Shutdown()
-		return
+		return m, tea.Quit
 	case "/newchat":
 		if chat, err := m.backend.NewChat(m.ctx); err == nil {
 			m.switchChat(chat)
@@ -422,6 +455,7 @@ func (m *Model) handleSlash(cmd string) {
 			SourceRef: SourceRef{ChatID: m.chatID, Name: "orchestrator"}, Text: text,
 		}, m.settings)
 	}
+	return m, nil
 }
 
 func (m *Model) insertRune(r rune) *Model {

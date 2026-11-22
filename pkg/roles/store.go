@@ -2,6 +2,8 @@ package roles
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 )
@@ -16,21 +18,40 @@ type Store struct {
 }
 
 // Open loads dir and returns a store that can be reloaded while readers run.
+// If dir does not exist or cannot be opened, it gracefully falls back to the
+// embedded built-in roles catalog.
 func Open(ctx context.Context, dir string) (*Store, error) {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return nil, err
+	if dir != "" {
+		abs, err := filepath.Abs(dir)
+		if err == nil {
+			if info, statErr := os.Stat(abs); statErr == nil && info.IsDir() {
+				catalog, loadErr := Load(ctx, abs)
+				if loadErr == nil {
+					return &Store{dir: abs, catalog: catalog}, nil
+				}
+			}
+		}
 	}
-	catalog, err := Load(ctx, abs)
+	catalog, err := LoadBuiltin(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load builtin roles: %w", err)
 	}
-	return &Store{dir: abs, catalog: catalog}, nil
+	return &Store{dir: "", catalog: catalog}, nil
 }
 
 // Reload reads the roles directory again.
 // On failure the previous catalog stays in place.
 func (s *Store) Reload(ctx context.Context) error {
+	if s.dir == "" {
+		catalog, err := LoadBuiltin(ctx)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.catalog = catalog
+		s.mu.Unlock()
+		return nil
+	}
 	catalog, err := Load(ctx, s.dir)
 	if err != nil {
 		return err

@@ -37,7 +37,7 @@ func (m *Model) handleWorkPathKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.store.Buffer(m.chatID).ApplyLiveEvent(RouteTraceEvent{
 			SourceRef: src, Text: "Working in " + abs,
 		}, m.settings)
-		return m, nil
+		return m, m.refreshGitStatusCmd()
 	default:
 		editFieldByKey(msg, func(fn func(string) string) {
 			m.workPathDraft = fn(m.workPathDraft)

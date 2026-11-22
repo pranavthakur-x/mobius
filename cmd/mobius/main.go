@@ -17,26 +17,69 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var Version = "v0.1.0"
+
+func printUsage() {
+	fmt.Printf(`mobius %s — High-Performance AI Agent Harness in Go
+
+Usage:
+  mobius [flags] [directory] [instruction]
+
+Examples:
+  mobius                              # Launch interactive TUI in current directory
+  mobius "fix test failures"          # Run one-shot instruction in current directory
+  mobius ~/my-repo "add unit tests"   # Run instruction in target directory
+
+Flags:
+  -v, --version    Print mobius version
+  -h, --help       Show this help message
+
+Environment Variables:
+  ANTHROPIC_API_KEY   Anthropic Claude API key
+  OPENAI_API_KEY      OpenAI API key
+  GEMINI_API_KEY      Google Gemini API key
+  DEEPSEEK_API_KEY    DeepSeek API key
+  OPENROUTER_API_KEY  OpenRouter API key
+`, Version)
+}
+
 func main() {
 	_ = godotenv.Load()
+
+	for _, arg := range os.Args[1:] {
+		if arg == "-v" || arg == "--version" {
+			fmt.Printf("mobius %s\n", Version)
+			return
+		}
+		if arg == "-h" || arg == "--help" {
+			printUsage()
+			return
+		}
+	}
+
 	workDir, args := workDirFromArgs(os.Args[1:])
 	registry := tools.NewDefaultRegistry(workDir)
 
-	eventStore, err := events.NewFileEventStore(".mobius/events", 256)
+	eventsDir := filepath.Join(workDir, ".mobius", "events")
+	eventStore, err := events.NewFileEventStore(eventsDir, 256)
 	if err != nil {
-		fmt.Printf("Error: Failed to init event store: %v\n", err)
-		os.Exit(1)
-	}
-	defer eventStore.Close()
-
-	cfg, err := llm.LoadConfig("config/model_config.toml")
-	if err != nil {
-		cfg, err = llm.LoadConfig("model_config.toml")
+		fallbackDir := filepath.Join(os.TempDir(), ".mobius", "events")
+		eventStore, err = events.NewFileEventStore(fallbackDir, 256)
 		if err != nil {
-			fmt.Printf("Error: Failed to load config: %v\n", err)
+			fmt.Printf("Error: Failed to init event store: %v\n", err)
 			os.Exit(1)
 		}
 	}
+	defer eventStore.Close()
+
+	cfg, err := llm.LoadConfigWithFallback("")
+	if err != nil {
+		fmt.Printf("Error: Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Auto-select provider based on available environment variables if default has no key
+	cfg.AutoSelectModel()
 
 	roleStore, err := roles.Open(context.Background(), "roles")
 	if err != nil {
@@ -52,9 +95,16 @@ func main() {
 	} else if !os.IsNotExist(err) {
 		fmt.Printf("Error: saved API connections: %v\n", err)
 	}
+
 	provider, err := cfg.GetProviderForModel("")
 	if err != nil {
-		fmt.Printf("Error: Failed to get provider: %v\n", err)
+		fmt.Printf("Error: %v\n\n", err)
+		fmt.Println("Please set an API key in your environment:")
+		fmt.Println("  export ANTHROPIC_API_KEY=\"sk-ant-...\"")
+		fmt.Println("  export OPENAI_API_KEY=\"sk-...\"")
+		fmt.Println("  export GEMINI_API_KEY=\"...\"")
+		fmt.Println("  export DEEPSEEK_API_KEY=\"...\"")
+		fmt.Println("  export OPENROUTER_API_KEY=\"sk-or-...\"")
 		os.Exit(1)
 	}
 

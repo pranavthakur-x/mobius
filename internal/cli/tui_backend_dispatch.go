@@ -40,6 +40,14 @@ func (b *TUIBackend) ReloadRoles(ctx context.Context, chatID string) error {
 	return ws.Manager().ReloadRoles(ctx)
 }
 
+// WorkDir returns the active workspace directory path.
+func (b *TUIBackend) WorkDir() string {
+	if b == nil || b.app == nil {
+		return "."
+	}
+	return b.app.WorkDir
+}
+
 // SetWorkDir updates the working directory used by tools and sensors.
 func (b *TUIBackend) SetWorkDir(dir string) (string, error) {
 	return b.app.SetWorkDir(dir)

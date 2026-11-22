@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,6 +11,10 @@ import (
 // liveEventMsg wraps one LiveEvent for the Update loop.
 type liveEventMsg struct {
 	ev LiveEvent
+}
+
+type gitStatusMsg struct {
+	status string
 }
 
 type dispatchDoneMsg struct {
@@ -45,6 +50,7 @@ type Model struct {
 	chatID        string
 	chatName      string
 	modelName     string
+	gitStatus     string
 	draft         string
 	composeLines  int
 	menu          FooterMenu
@@ -53,6 +59,9 @@ type Model struct {
 	menuIDs       []string
 	roleNames     []string
 	routing       bool
+	inFlight      bool
+	turnCanceled  bool
+	turnCancel    context.CancelFunc
 
 	sidebarBreakdown ContextBreakdown
 	subCancel        context.CancelFunc
@@ -147,12 +156,43 @@ func (m *Model) enqueueEvent(ev LiveEvent) {
 	}
 }
 
-// Init starts the background live-event listener and enables mouse cell motion.
+// Init starts the background live-event listener, git header probe, and enables mouse cell motion.
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		waitLiveEvent(m.events, m.ctx),
+		m.refreshGitStatusCmd(),
 		tea.EnableMouseCellMotion,
 	)
+}
+
+func (m *Model) refreshGitStatusCmd() tea.Cmd {
+	backend := m.backend
+	return func() tea.Msg {
+		dir := "."
+		if backend != nil {
+			dir = backend.WorkDir()
+		}
+		return gitStatusMsg{status: GitStatusSummary(dir)}
+	}
+}
+
+func (m *Model) clearTurn() {
+	if m.turnCancel != nil {
+		m.turnCancel()
+		m.turnCancel = nil
+	}
+	m.routing = false
+	m.inFlight = false
+}
+
+func (m *Model) cancelActiveTurn() {
+	if !m.inFlight && !m.routing {
+		return
+	}
+	m.turnCanceled = true
+	m.clearTurn()
+	m.store.Buffer(m.chatID).CancelStreaming()
+	m.refreshSidebar()
 }
 
 func waitLiveEvent(ch <-chan LiveEvent, ctx context.Context) tea.Cmd {
@@ -203,21 +243,36 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, tea.Batch(cmd, waitLiveEvent(m.events, m.ctx))
+	case gitStatusMsg:
+		m.gitStatus = msg.status
+		return m, nil
 	case orchestratorReplyMsg:
 		m.showOrchestratorDecision(msg.chatID, msg.runID, msg.trace, msg.reply)
-		m.routing = false
+		m.clearTurn()
+		m.turnCanceled = false
 		m.refreshSidebar()
-		return m, waitLiveEvent(m.events, m.ctx)
+		return m, tea.Batch(waitLiveEvent(m.events, m.ctx), m.refreshGitStatusCmd())
 	case dispatchStartedMsg:
 		m.showOrchestratorDecision(msg.handle.ChatID, msg.handle.RunID, msg.handle.Trace, "")
 		m.routing = false
 		m.refreshSidebar()
 		if msg.handle.Done == nil {
-			return m, waitLiveEvent(m.events, m.ctx)
+			m.clearTurn()
+			m.turnCanceled = false
+			return m, tea.Batch(waitLiveEvent(m.events, m.ctx), m.refreshGitStatusCmd())
 		}
 		return m, tea.Batch(waitLiveEvent(m.events, m.ctx), waitDispatch(msg.handle))
 	case dispatchDoneMsg:
-		m.routing = false
+		wasCanceled := m.turnCanceled
+		m.clearTurn()
+		m.turnCanceled = false
+		if errors.Is(msg.done.Err, context.Canceled) {
+			if !wasCanceled {
+				m.store.Buffer(msg.handle.ChatID).CancelStreaming()
+			}
+			m.refreshSidebar()
+			return m, tea.Batch(waitLiveEvent(m.events, m.ctx), m.refreshGitStatusCmd())
+		}
 		src := SourceRef{ChatID: msg.handle.ChatID, Name: msg.handle.RoleID}
 		if w, ok := m.lookupRoleName(msg.handle.TeamID, msg.handle.RoleID); ok {
 			src.Name = w
@@ -249,7 +304,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}, m.settings)
 		}
 		m.refreshSidebar()
-		return m, waitLiveEvent(m.events, m.ctx)
+		return m, tea.Batch(waitLiveEvent(m.events, m.ctx), m.refreshGitStatusCmd())
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -402,6 +457,9 @@ func (m *Model) refreshTeams() {
 }
 
 func (m *Model) refreshSidebar() {
+	if m.backend == nil {
+		return
+	}
 	buf := m.store.Buffer(m.chatID)
 	snap := m.backend.ContextFor(m.chatID, buf.ViewFilter)
 	snap.Breakdown.NoteConversation(EstimateTranscript(buf.VisibleBlocks()))
@@ -417,6 +475,7 @@ func (m *Model) refreshSidebar() {
 
 // Shutdown stops listeners; do not close the event channel while hooks may still fire.
 func (m *Model) Shutdown() {
+	m.clearTurn()
 	m.cancel()
 	if m.subCancel != nil {
 		m.subCancel()

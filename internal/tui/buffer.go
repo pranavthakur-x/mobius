@@ -498,6 +498,42 @@ func roleNameForFilter(roleID string) string {
 	return roleID
 }
 
+// CancelStreaming finalizes any in-flight streaming blocks after a user interrupt
+// so partial output stays readable without a hanging cursor, resets running workers
+// to idle, and records an interrupt trace notice.
+func (b *ChatBuffer) CancelStreaming() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.clearPendingThought()
+	out := b.Blocks[:0]
+	for _, bl := range b.Blocks {
+		if bl.Kind == BlockStreaming {
+			bl.StreamingTool = ""
+			if strings.TrimSpace(bl.Text) == "" {
+				continue
+			}
+			bl.Kind = BlockFinal
+		}
+		out = append(out, bl)
+	}
+	b.Blocks = out
+
+	for i := range b.Teams {
+		if b.Teams[i].State == WorkerRunning {
+			b.Teams[i].State = WorkerIdle
+		}
+	}
+
+	b.Blocks = append(b.Blocks, TranscriptBlock{
+		ID:      fmt.Sprintf("tr-%d", len(b.Blocks)),
+		Kind:    BlockTrace,
+		Speaker: "mobius",
+		Text:    "Interrupted by user (Ctrl+C)",
+	})
+	b.bumpFollow()
+}
+
 // HasBudgetInTranscript is a test helper — budget must never appear.
 func (b *ChatBuffer) HasBudgetInTranscript() bool {
 	b.mu.Lock()

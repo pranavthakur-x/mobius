@@ -19,6 +19,7 @@ const (
 	ActionChats
 	ActionTeams
 	ActionWorkDir
+	ActionHelp
 	ActionExit
 )
 
@@ -31,6 +32,7 @@ var actionLabels = []string{
 	"Switch / List Chats",
 	"Show Teams",
 	"Work on path",
+	"Help",
 	"Exit",
 }
 

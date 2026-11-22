@@ -8,6 +8,7 @@ type commandKind int
 
 const (
 	cmdNone commandKind = iota
+	cmdHelp
 	cmdTeams
 	cmdReloadRoles
 	cmdMention
@@ -17,6 +18,33 @@ const (
 	cmdTeamLead
 	cmdDecide
 )
+
+// HelpText returns formatted documentation of slash commands, mentions, and shortcuts.
+func HelpText() string {
+	return `# Mobius Commands & Shortcuts
+
+### Slash Commands
+• /help — Show this help message
+• /teams — List active departments, teams, and member roles
+• /reload-roles — Reload role definitions from disk
+• /newchat — Start a fresh chat session
+• /listchats — Switch between saved chats
+• /models — Select or configure the active LLM
+• /connect — Connect a custom LLM endpoint or API key
+• /workdir — Change the active workspace directory
+• /exit — Exit Mobius
+
+### Role Delegation & Mentions
+• *<role> <task> — Direct delegation to a role (e.g. *Software Engineer fix race bug)
+• tell <team> <directive> — Send an in-flight steering directive to a team
+• create team <dept> — Instantiate a new team from a department template
+
+### Navigation & Shortcuts
+• Tab / Shift+Tab — Switch focus between prompt and panels
+• Ctrl+O — Open tools / file inspector
+• Esc — Close open menu or clear input
+• Ctrl+C — Cancel running turn or quit`
+}
 
 type parsedCommand struct {
 	kind      commandKind
@@ -45,6 +73,9 @@ func parseInput(input string, mgr *Manager) parsedCommand {
 	lower := strings.ToLower(trimmed)
 
 	switch lower {
+	case "/help":
+		out.kind = cmdHelp
+		return out
 	case "/teams":
 		out.kind = cmdTeams
 		return out

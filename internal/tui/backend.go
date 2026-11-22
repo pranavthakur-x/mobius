@@ -106,6 +106,7 @@ type Backend interface {
 	DeleteChat(ctx context.Context, chatID string) (ChatSnapshot, error)
 	Catalog(chatID string) []TeamSnapshot
 	ReloadRoles(ctx context.Context, chatID string) error
+	WorkDir() string
 	SetWorkDir(dir string) (string, error)
 	TeamsText(chatID string) string
 	NewChat(ctx context.Context) (ChatSnapshot, error)

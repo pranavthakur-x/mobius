@@ -829,3 +829,15 @@ func TestDecideIncludesBoundedRedactedRecentTurnsOnFollowUp(t *testing.T) {
 		}
 	}
 }
+
+func TestHelpCommand(t *testing.T) {
+	parsed := parseInput("/help", nil)
+	if parsed.kind != cmdHelp {
+		t.Fatalf("expected cmdHelp, got %v", parsed.kind)
+	}
+
+	help := HelpText()
+	if !strings.Contains(help, "/help") || !strings.Contains(help, "/teams") || !strings.Contains(help, "Navigation & Shortcuts") {
+		t.Fatalf("help text missing expected commands: %s", help)
+	}
+}

@@ -79,13 +79,17 @@ func FitScreen(m *Model) string {
 	return fitBlock(lipgloss.JoinHorizontal(lipgloss.Top, side, right), m.height)
 }
 
-func renderHeader(chatW int, chatName, model, view string) string {
-	title := fmt.Sprintf("Mobius %s · %s  = %s", chatName, model, view)
+func renderHeader(chatW int, chatName, model, gitStatus, view string) string {
+	title := fmt.Sprintf("Mobius %s · %s", chatName, model)
+	if gitStatus != "" {
+		title += " · " + gitStatus
+	}
+	title += "  = " + view
 	return lipgloss.NewStyle().Width(chatW).Render(title)
 }
 
 func renderRight(sz LayoutSizes, m *Model) string {
-	header := theme.StyleRoot.Width(sz.ChatW).MaxHeight(1).Render(renderHeader(sz.ChatW, m.chatName, m.modelName, m.viewLabel()))
+	header := theme.StyleRoot.Width(sz.ChatW).MaxHeight(1).Render(renderHeader(sz.ChatW, m.chatName, m.modelName, m.gitStatus, m.viewLabel()))
 	transcript := renderTranscript(sz, m)
 	footer := renderFooter(sz, m)
 	return fitBlock(header+"\n"+transcript+"\n"+footer, sz.Height)
@@ -221,7 +225,9 @@ func renderFooter(sz LayoutSizes, m *Model) string {
 	b.WriteString("\n")
 	hint := "= view    * mention    ctrl+o tools"
 	if m.routing {
-		hint += "     " + theme.StyleGreen.Render("routing…")
+		hint += "     " + theme.StyleGreen.Render("routing… (ctrl+c cancel)")
+	} else if m.inFlight {
+		hint += "     " + theme.StyleGreen.Render("running… (ctrl+c cancel)")
 	}
 	b.WriteString(theme.StyleMuted.Width(width).Render(hint))
 	return b.String()

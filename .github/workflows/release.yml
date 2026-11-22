@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Build Matrix
+        run: |
+          mkdir -p dist
+          TAG_NAME="${GITHUB_REF_NAME}"
+          VERSION="${TAG_NAME#v}"
+          
+          PLATFORMS=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+          )
+          
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            OS="${PLATFORM%/*}"
+            ARCH="${PLATFORM#*/}"
+            BIN_NAME="mobius"
+            EXT=""
+            if [ "$OS" = "windows" ]; then
+              EXT=".exe"
+            fi
+            
+            OUTPUT_BIN="dist/mobius-${OS}-${ARCH}${EXT}"
+            echo "Building for ${OS}/${ARCH}..."
+            GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 go build \
+              -ldflags="-s -w -X main.Version=${TAG_NAME}" \
+              -o "${OUTPUT_BIN}" ./cmd/mobius
+              
+            # Package into tarball / zip
+            ARCHIVE_DIR="dist/mobius_${VERSION}_${OS}_${ARCH}"
+            mkdir -p "${ARCHIVE_DIR}"
+            cp "${OUTPUT_BIN}" "${ARCHIVE_DIR}/${BIN_NAME}${EXT}"
+            cp README.md LICENSE "${ARCHIVE_DIR}/" 2>/dev/null || true
+            
+            if [ "$OS" = "windows" ]; then
+              (cd dist && zip -r "mobius_${VERSION}_${OS}_${ARCH}.zip" "mobius_${VERSION}_${OS}_${ARCH}")
+            else
+              (cd dist && tar -czvf "mobius_${VERSION}_${OS}_${ARCH}.tar.gz" "mobius_${VERSION}_${OS}_${ARCH}")
+            fi
+            rm -rf "${ARCHIVE_DIR}" "${OUTPUT_BIN}"
+          done
+          
+          # Generate SHA256 checksums
+          cd dist
+          sha256sum mobius_* > checksums.txt
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/mobius_*
+            dist/checksums.txt
+          generate_release_notes: true

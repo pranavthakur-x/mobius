@@ -1,6 +1,7 @@
 package llm
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 )
+
+//go:embed builtin_config.toml
+var builtinConfigBytes []byte
 
 // ProviderConfig defines the TOML configuration block for an LLM provider.
 type ProviderConfig struct {
@@ -80,6 +84,97 @@ func (c *Config) pricesKnown(modelName string) bool {
 	_, prompt := c.Pricing.Prompt[modelName]
 	_, completion := c.Pricing.Completion[modelName]
 	return prompt || completion
+}
+
+// LoadConfigBytes parses TOML bytes into a Config.
+func LoadConfigBytes(data []byte) (*Config, error) {
+	var cfg Config
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse TOML config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// LoadBuiltinConfig parses the embedded configuration.
+func LoadBuiltinConfig() (*Config, error) {
+	return LoadConfigBytes(builtinConfigBytes)
+}
+
+// LoadConfigWithFallback attempts to load a TOML configuration from:
+// 1. specified path (if provided and exists)
+// 2. config/model_config.toml
+// 3. model_config.toml
+// 4. ~/.mobius/model_config.toml
+// 5. Embedded builtin configuration
+func LoadConfigWithFallback(path string) (*Config, error) {
+	candidates := make([]string, 0, 4)
+	if strings.TrimSpace(path) != "" {
+		candidates = append(candidates, strings.TrimSpace(path))
+	}
+	candidates = append(candidates, "config/model_config.toml", "model_config.toml")
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".mobius", "model_config.toml"))
+		candidates = append(candidates, filepath.Join(home, ".mobius", "config.toml"))
+	}
+
+	for _, cand := range candidates {
+		cfg, err := LoadConfig(cand)
+		if err == nil {
+			return cfg, nil
+		}
+	}
+
+	return LoadBuiltinConfig()
+}
+
+// AutoSelectModel inspects available API keys in the environment. If the current
+// active model lacks an API key, it switches to a model whose provider key is set.
+func (c *Config) AutoSelectModel() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.hasKeyForModelLocked(c.ActiveModel) {
+		return
+	}
+
+	type candidate struct {
+		envVar string
+		model  string
+	}
+	candidates := []candidate{
+		{"ANTHROPIC_API_KEY", "claude-3-5-sonnet-20241022"},
+		{"OPENAI_API_KEY", "gpt-4o"},
+		{"GEMINI_API_KEY", "gemini-2.5-flash"},
+		{"DEEPSEEK_API_KEY", "deepseek-chat"},
+		{"OPENROUTER_API_KEY", "deepseek/deepseek-v4.1-flash"},
+	}
+
+	for _, cand := range candidates {
+		if val := strings.TrimSpace(os.Getenv(cand.envVar)); val != "" {
+			c.ActiveModel = cand.model
+			return
+		}
+	}
+}
+
+func (c *Config) hasKeyForModelLocked(modelName string) bool {
+	if _, ok := c.matchSaved(modelName); ok {
+		return true
+	}
+	for _, prov := range c.Providers {
+		for _, m := range prov.Models {
+			if m == modelName {
+				if prov.EnvKey == "" {
+					return true // e.g. local Ollama
+				}
+				return strings.TrimSpace(os.Getenv(prov.EnvKey)) != ""
+			}
+		}
+	}
+	return false
 }
 
 // LoadConfig reads and unmarshals a TOML configuration file from the specified path.
