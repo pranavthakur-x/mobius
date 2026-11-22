@@ -72,22 +72,35 @@ fi
 
 echo -e "${BLUE}==>${NC} Extracting binary..."
 tar -xzf "$TMP_DIR/$TARBALL" -C "$TMP_DIR"
+EXTRACTED_BIN="$TMP_DIR/mobius_${VERSION}_${TARGET_OS}_${TARGET_ARCH}/${BIN_NAME}"
+if [ ! -f "$EXTRACTED_BIN" ]; then
+  EXTRACTED_BIN="$TMP_DIR/${BIN_NAME}"
+fi
 
 # Install target
+SUDO=""
 if [ ! -w "$INSTALL_DIR" ]; then
-  # Try ~/.local/bin if /usr/local/bin requires root
-  if [ -d "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin" 2>/dev/null; then
+  # Prefer ~/.local/bin if already on PATH, otherwise use sudo for /usr/local/bin
+  if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
+    mkdir -p "$HOME/.local/bin"
     INSTALL_DIR="$HOME/.local/bin"
-  else
+  elif command -v sudo >/dev/null 2>&1; then
     SUDO="sudo"
+  else
+    mkdir -p "$HOME/.local/bin"
+    INSTALL_DIR="$HOME/.local/bin"
   fi
 fi
 
 echo -e "${BLUE}==>${NC} Installing to ${INSTALL_DIR}/${BIN_NAME}..."
-$SUDO cp "$TMP_DIR/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+$SUDO cp "$EXTRACTED_BIN" "$INSTALL_DIR/$BIN_NAME"
 $SUDO chmod +x "$INSTALL_DIR/$BIN_NAME"
 
 echo -e "${GREEN}✓ Successfully installed mobius (${LATEST_TAG}) to ${INSTALL_DIR}/${BIN_NAME}!${NC}"
+if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+  echo -e "${YELLOW}Note: ${INSTALL_DIR} is not in your PATH. Add this to your ~/.bashrc or ~/.zshrc:${NC}"
+  echo -e "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+fi
 echo ""
 echo -e "Quickstart:"
 echo -e "  export ANTHROPIC_API_KEY=\"your-key\"   # or OPENAI_API_KEY / GEMINI_API_KEY"
