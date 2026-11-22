@@ -1,7 +1,8 @@
 package tui
 
 import (
-	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"mobius/internal/tui/theme"
@@ -9,7 +10,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const sidebarWidth = 30
+const (
+	sidebarWidth = 30
+	mobiusBanner = "v0.1.0"
+)
 
 // LayoutSizes splits terminal height/width into header, body, footer.
 type LayoutSizes struct {
@@ -32,15 +36,18 @@ func ComputeLayout(width, height int, showContext bool, composeLines, menuLines 
 	if menuLines < 0 {
 		menuLines = 0
 	}
-	maxMenu := height - 1 - 2 - composeLines - 1 // header, rule, hint, compose, one transcript line
+	header := 4
+	if height < 12 {
+		header = 1
+	}
+	maxMenu := height - header - 3 - composeLines - 1 // header, top+bottom rules, hint, compose, one transcript line
 	if maxMenu < 1 {
 		maxMenu = 1
 	}
 	if menuLines > maxMenu {
 		menuLines = maxMenu
 	}
-	footer := 2 + composeLines + menuLines // rule + menu + input + hint
-	header := 1
+	footer := 3 + composeLines + menuLines // top rule + menu + input + bottom rule + hint
 	transcript := height - header - footer
 	if transcript < 1 {
 		transcript = 1
@@ -79,17 +86,72 @@ func FitScreen(m *Model) string {
 	return fitBlock(lipgloss.JoinHorizontal(lipgloss.Top, side, right), m.height)
 }
 
-func renderHeader(chatW int, chatName, model, gitStatus, view string) string {
-	title := fmt.Sprintf("Mobius %s · %s", chatName, model)
-	if gitStatus != "" {
-		title += " · " + gitStatus
+func shortenHome(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" || dir == "." {
+		if cwd, err := os.Getwd(); err == nil {
+			dir = cwd
+		}
 	}
-	title += "  = " + view
-	return lipgloss.NewStyle().Width(chatW).Render(title)
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if dir == home {
+			return "~"
+		}
+		if strings.HasPrefix(dir, home+string(os.PathSeparator)) {
+			return "~" + dir[len(home):]
+		}
+	}
+	return dir
+}
+
+func styleGitStatus(gitStatus string) string {
+	if gitStatus == "" {
+		return ""
+	}
+	if strings.Contains(gitStatus, "modified") {
+		return theme.StyleOrange.Render(gitStatus)
+	}
+	return theme.StyleGreen.Render(gitStatus)
+}
+
+func renderHeader(chatW, headerH int, chatName, model, gitStatus, workDir, view string, mascotFrame int) string {
+	if headerH < 4 {
+		title := theme.StyleBold.Render("Mobius") + " " + theme.StyleMuted.Render(chatName+" · "+model)
+		if gitStatus != "" {
+			title += theme.StyleDim.Render(" · ") + styleGitStatus(gitStatus)
+		}
+		title += "  " + theme.StyleMuted.Render("= "+view)
+		return lipgloss.NewStyle().Width(chatW).MaxHeight(1).Render(title)
+	}
+
+	mascot := renderMascot(mascotFrame)
+
+	line1 := theme.StyleBold.Render("Mobius") + " " + theme.StyleMuted.Render(mobiusBanner)
+	if chatName != "" && chatName != "New Chat" {
+		line1 += theme.StyleDim.Render(" · ") + theme.StyleMuted.Render(chatName)
+	}
+	line1 += theme.StyleDim.Render(" · ") + theme.StyleMuted.Render("= "+view)
+
+	line2 := theme.StyleMuted.Render(model)
+	if gitStatus != "" {
+		line2 += theme.StyleDim.Render(" · ") + styleGitStatus(gitStatus)
+	}
+
+	line3 := theme.StyleMuted.Render(shortenHome(workDir))
+
+	row1 := lipgloss.NewStyle().Width(chatW).MaxHeight(1).Render(mascot[0] + "  " + line1)
+	row2 := lipgloss.NewStyle().Width(chatW).MaxHeight(1).Render(mascot[1] + "  " + line2)
+	row3 := lipgloss.NewStyle().Width(chatW).MaxHeight(1).Render(mascot[2] + "  " + line3)
+	return row1 + "\n" + row2 + "\n" + row3 + "\n"
 }
 
 func renderRight(sz LayoutSizes, m *Model) string {
-	header := theme.StyleRoot.Width(sz.ChatW).MaxHeight(1).Render(renderHeader(sz.ChatW, m.chatName, m.modelName, m.gitStatus, m.viewLabel()))
+	header := theme.StyleRoot.Width(sz.ChatW).MaxHeight(sz.Header).Render(
+		renderHeader(sz.ChatW, sz.Header, m.chatName, m.modelName, m.gitStatus, m.workDir, m.viewLabel(), m.mascotFrame),
+	)
 	transcript := renderTranscript(sz, m)
 	footer := renderFooter(sz, m)
 	return fitBlock(header+"\n"+transcript+"\n"+footer, sz.Height)
@@ -145,6 +207,16 @@ func renderScrollbar(trackH int, vp Viewport) string {
 	if trackH <= 0 {
 		return ""
 	}
+	if vp.ContentLines <= trackH {
+		var blank strings.Builder
+		for i := 0; i < trackH; i++ {
+			blank.WriteByte(' ')
+			if i+1 < trackH {
+				blank.WriteByte('\n')
+			}
+		}
+		return blank.String()
+	}
 	var b strings.Builder
 	thumb := vp.ThumbPosition(trackH)
 	for i := 0; i < trackH; i++ {
@@ -156,6 +228,38 @@ func renderScrollbar(trackH int, vp Viewport) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func renderComposePrompt(m *Model, width int) string {
+	runes := []rune(m.draft)
+	pos := m.cursorIndex(runes)
+
+	var rendered strings.Builder
+	for i, r := range runes {
+		if i == pos {
+			if r == '\n' {
+				rendered.WriteString(theme.StyleCursor.Render(" "))
+				rendered.WriteRune('\n')
+			} else {
+				rendered.WriteString(theme.StyleCursor.Render(string(r)))
+			}
+		} else {
+			rendered.WriteRune(r)
+		}
+	}
+	if pos >= len(runes) {
+		rendered.WriteString(theme.StyleCursor.Render(" "))
+	}
+
+	lines := strings.Split(rendered.String(), "\n")
+	for i := range lines {
+		prefix := "  "
+		if i == 0 {
+			prefix = theme.StyleMascot.Render("❯") + " "
+		}
+		lines[i] = theme.StylePrompt.Width(width).Render(prefix + lines[i])
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderFooter(sz LayoutSizes, m *Model) string {
@@ -217,17 +321,15 @@ func renderFooter(sz LayoutSizes, m *Model) string {
 		b.WriteString(renderMenuFooter(m, width, sz.MenuLines))
 		b.WriteString("\n")
 	}
-	input := m.draft
-	if input == "" {
-		input = " "
-	}
-	b.WriteString(theme.StyleUser.Width(width).Render("❯ " + input))
+	b.WriteString(renderComposePrompt(m, width))
 	b.WriteString("\n")
-	hint := "= view    * mention    ctrl+o tools"
+	b.WriteString(theme.StyleBorder.Width(width).Render(strings.Repeat("─", width)))
+	b.WriteString("\n")
+	hint := "  / commands · * mention · = view · ctrl+o tools"
 	if m.routing {
-		hint += "     " + theme.StyleGreen.Render("routing… (ctrl+c cancel)")
+		hint += "   " + theme.StyleGreen.Render("routing… (ctrl+c cancel)")
 	} else if m.inFlight {
-		hint += "     " + theme.StyleGreen.Render("running… (ctrl+c cancel)")
+		hint += "   " + theme.StyleGreen.Render("running… (ctrl+c cancel)")
 	}
 	b.WriteString(theme.StyleMuted.Width(width).Render(hint))
 	return b.String()

@@ -87,12 +87,89 @@ func TestCtrlCInterruptsActiveTurnWithoutQuitting(t *testing.T) {
 }
 
 func TestRenderHeaderIncludesGitStatus(t *testing.T) {
-	got := markdown.StripANSI(renderHeader(120, "Chat 1", "gpt-4o", "Git: (dev 3 modified)", "all"))
-	if !strings.Contains(got, "Git: (dev 3 modified)") {
-		t.Fatalf("header missing git status: %q", got)
+	got := markdown.StripANSI(renderHeader(120, 4, "Chat 1", "gpt-4o", "Git: (dev 3 modified)", "/tmp/project", "all", 0))
+	if !strings.Contains(got, "Mobius") || !strings.Contains(got, "gpt-4o") {
+		t.Fatalf("header missing brand or model:\n%s", got)
 	}
-	if !strings.Contains(got, "Mobius Chat 1 · gpt-4o · Git: (dev 3 modified)") {
-		t.Fatalf("unexpected header formatting: %q", got)
+	if !strings.Contains(got, "Git: (dev 3 modified)") {
+		t.Fatalf("header missing git status:\n%s", got)
+	}
+	if !strings.Contains(got, "/tmp/project") {
+		t.Fatalf("header missing workDir:\n%s", got)
+	}
+	if !strings.Contains(got, "▄██▄  ▄██▄") {
+		t.Fatalf("header missing pixel mascot:\n%s", got)
+	}
+}
+
+func TestMascotClickTriggersAndCompletesAnimation(t *testing.T) {
+	m := &Model{
+		settings: Settings{ShowContext: false},
+		store:    NewChatStore("c1"),
+		ledger:   NewBudgetLedger(),
+		vp:       NewViewport(),
+		width:    100,
+		height:   30,
+		chatID:   "c1",
+	}
+
+	// Clicking outside the mascot hit-box does nothing.
+	_, cmd := m.Update(tea.MouseMsg{X: 50, Y: 10, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if cmd != nil || m.mascotFrame != 0 {
+		t.Fatal("expected click outside mascot not to animate")
+	}
+
+	// Clicking inside the mascot hit-box starts animation and returns a tick command.
+	_, cmd = m.Update(tea.MouseMsg{X: 5, Y: 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if cmd == nil || m.mascotFrame != 1 || m.mascotRemaining != mascotOrbitFrames {
+		t.Fatalf("expected animation started, frame=%d remaining=%d cmd=%v", m.mascotFrame, m.mascotRemaining, cmd != nil)
+	}
+
+	// Clicking again while running extends without spawning a duplicate ticker.
+	_, dupCmd := m.Update(tea.MouseMsg{X: 5, Y: 1, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if dupCmd != nil {
+		t.Fatal("expected re-click during animation not to spawn duplicate ticker")
+	}
+
+	// Ticking through all remaining frames advances frames and returns cleanly to frame 0.
+	for i := 0; i < mascotOrbitFrames; i++ {
+		_, cmd = m.Update(mascotTickMsg{})
+	}
+	if m.mascotFrame != 0 || m.mascotRemaining != 0 || cmd != nil {
+		t.Fatalf("expected animation to settle at frame 0, got frame=%d remaining=%d cmd=%v", m.mascotFrame, m.mascotRemaining, cmd != nil)
+	}
+}
+
+func TestComposeCursorEditingAndDualRules(t *testing.T) {
+	m := &Model{
+		settings:     DefaultSettings(),
+		store:        NewChatStore("c1"),
+		ledger:       NewBudgetLedger(),
+		vp:           NewViewport(),
+		width:        80,
+		height:       24,
+		chatID:       "c1",
+		composeLines: 1,
+	}
+
+	// Type "helo", move left once, insert 'l' -> "hello"
+	for _, r := range "helo" {
+		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	if m.draft != "hello" {
+		t.Fatalf("expected %q after mid-string insert, got %q", "hello", m.draft)
+	}
+
+	// Render footer and confirm top & bottom horizontal rules frame the compose line.
+	sz := ComputeLayout(80, 24, false, m.composeLines, 0)
+	footer := markdown.StripANSI(renderFooter(sz, m))
+	if strings.Count(footer, strings.Repeat("─", 80)) < 2 {
+		t.Fatalf("expected top and bottom rules in compose footer:\n%s", footer)
+	}
+	if !strings.Contains(footer, "❯ hello") {
+		t.Fatalf("expected prompt text in compose footer:\n%s", footer)
 	}
 }
 

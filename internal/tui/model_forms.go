@@ -33,6 +33,7 @@ func (m *Model) handleWorkPathKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.workPathOn = false
 		m.workPathDraft = ""
 		m.workPathErr = ""
+		m.workDir = abs
 		src := SourceRef{ChatID: m.chatID, Name: "orchestrator", Kind: SourceOrchestrator}
 		m.store.Buffer(m.chatID).ApplyLiveEvent(RouteTraceEvent{
 			SourceRef: src, Text: "Working in " + abs,

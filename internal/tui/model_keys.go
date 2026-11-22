@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"strings"
-	"unicode/utf8"
 
 	"mobius/pkg/orchestrator"
 
@@ -70,16 +69,29 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+d":
 		m.vp.ScrollDown(m.vp.Height / 2)
 		return m, nil
-	case " ", "space":
-		m.draft += " "
-		m.updateComposeLines()
-		return m, nil
-	case "backspace":
-		if len(m.draft) > 0 {
-			_, size := utf8.DecodeLastRuneInString(m.draft)
-			m.draft = m.draft[:len(m.draft)-size]
-			m.updateComposeLines()
+	case "left":
+		if n := len([]rune(m.draft)); m.cursorFromEnd < n {
+			m.cursorFromEnd++
 		}
+		return m, nil
+	case "right":
+		if m.cursorFromEnd > 0 {
+			m.cursorFromEnd--
+		}
+		return m, nil
+	case "ctrl+a":
+		m.cursorFromEnd = len([]rune(m.draft))
+		return m, nil
+	case "ctrl+e":
+		m.cursorFromEnd = 0
+		return m, nil
+	case " ", "space":
+		return m.insertRune(' '), nil
+	case "backspace":
+		m.deleteBeforeCursor()
+		return m, nil
+	case "delete", "del":
+		m.deleteAtCursor()
 		return m, nil
 	case "esc":
 		return m, nil
@@ -90,8 +102,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m.openMenu(trig), nil
 				}
 				if r >= 32 {
-					m.draft += string(r)
-					m.updateComposeLines()
+					m.insertRune(r)
 				}
 			}
 		}
@@ -392,6 +403,7 @@ func (m *Model) submit() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.draft = ""
+	m.cursorFromEnd = 0
 	m.composeLines = 1
 	buf := m.store.Buffer(m.chatID)
 	runID := buf.BeginRun()
@@ -458,10 +470,62 @@ func (m *Model) handleSlash(cmd, runID string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) cursorIndex(runes []rune) int {
+	pos := len(runes) - m.cursorFromEnd
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > len(runes) {
+		pos = len(runes)
+	}
+	return pos
+}
+
 func (m *Model) insertRune(r rune) *Model {
-	m.draft += string(r)
+	if m.cursorFromEnd <= 0 {
+		m.cursorFromEnd = 0
+		m.draft += string(r)
+		m.updateComposeLines()
+		return m
+	}
+	runes := []rune(m.draft)
+	pos := m.cursorIndex(runes)
+	next := make([]rune, 0, len(runes)+1)
+	next = append(next, runes[:pos]...)
+	next = append(next, r)
+	next = append(next, runes[pos:]...)
+	m.draft = string(next)
 	m.updateComposeLines()
 	return m
+}
+
+func (m *Model) deleteBeforeCursor() {
+	runes := []rune(m.draft)
+	pos := m.cursorIndex(runes)
+	if pos <= 0 {
+		return
+	}
+	next := make([]rune, 0, len(runes)-1)
+	next = append(next, runes[:pos-1]...)
+	next = append(next, runes[pos:]...)
+	m.draft = string(next)
+	m.updateComposeLines()
+}
+
+func (m *Model) deleteAtCursor() {
+	runes := []rune(m.draft)
+	pos := m.cursorIndex(runes)
+	if pos >= len(runes) {
+		return
+	}
+	next := make([]rune, 0, len(runes)-1)
+	next = append(next, runes[:pos]...)
+	next = append(next, runes[pos+1:]...)
+	m.draft = string(next)
+	if m.cursorFromEnd > 0 {
+		m.cursorFromEnd--
+	}
+	m.updateComposeLines()
 }
 
 func (m *Model) updateComposeLines() {

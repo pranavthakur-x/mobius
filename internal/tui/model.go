@@ -46,22 +46,26 @@ type Model struct {
 	decoder *LineDecoder
 	vp      Viewport
 
-	width, height int
-	chatID        string
-	chatName      string
-	modelName     string
-	gitStatus     string
-	draft         string
-	composeLines  int
-	menu          FooterMenu
-	menuIndex     int
-	menuItems     []string
-	menuIDs       []string
-	roleNames     []string
-	routing       bool
-	inFlight      bool
-	turnCanceled  bool
-	turnCancel    context.CancelFunc
+	width, height   int
+	chatID          string
+	chatName        string
+	modelName       string
+	workDir         string
+	gitStatus       string
+	draft           string
+	cursorFromEnd   int
+	composeLines    int
+	menu            FooterMenu
+	menuIndex       int
+	menuItems       []string
+	menuIDs         []string
+	roleNames       []string
+	routing         bool
+	inFlight        bool
+	turnCanceled    bool
+	turnCancel      context.CancelFunc
+	mascotFrame     int
+	mascotRemaining int
 
 	sidebarBreakdown ContextBreakdown
 	subCancel        context.CancelFunc
@@ -112,6 +116,7 @@ func NewModel(backend Backend, settings Settings, width, height int) (*Model, er
 		chatID:       chat.ID,
 		chatName:     chat.Name,
 		modelName:    backend.CurrentModel(chat.ID),
+		workDir:      backend.WorkDir(),
 		composeLines: 1,
 	}
 	m.hydrateChats()
@@ -217,6 +222,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case tea.MouseMsg:
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.isMascotClick(msg.X, msg.Y) {
+			return m, m.triggerMascotAnim()
+		}
 		if msg.Button == tea.MouseButtonWheelUp {
 			m.vp.ScrollUp(3)
 			buf := m.store.Buffer(m.chatID)
@@ -228,6 +236,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			buf.AutoFollow = m.vp.AutoFollow
 		}
 		return m, nil
+	case mascotTickMsg:
+		if m.mascotRemaining <= 0 {
+			m.mascotFrame = 0
+			return m, nil
+		}
+		m.mascotRemaining--
+		if m.mascotRemaining == 0 {
+			m.mascotFrame = 0
+			return m, nil
+		}
+		m.mascotFrame = (m.mascotFrame % mascotTotalFrames) + 1
+		return m, mascotTickCmd()
 	case liveEventMsg:
 		cmd := m.applyLive(msg.ev)
 		// Drain already-buffered bursts (e.g. fast SSE token streams) in one render pass.
