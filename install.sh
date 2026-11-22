@@ -42,7 +42,7 @@ esac
 echo -e "${BLUE}==>${NC} Detected platform: ${TARGET_OS}/${TARGET_ARCH}"
 
 # Fetch latest release tag from GitHub API
-LATEST_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+LATEST_TAG=$(curl -fsSL --connect-timeout 15 --max-time 30 "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
 if [ -z "$LATEST_TAG" ]; then
   echo -e "${YELLOW}Notice: No pre-built release binary found yet.${NC}"
@@ -65,7 +65,7 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo -e "${BLUE}==>${NC} Downloading ${DOWNLOAD_URL}..."
-if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/$TARBALL"; then
+if ! curl -fL --progress-bar --connect-timeout 15 --max-time 120 --retry 2 "$DOWNLOAD_URL" -o "$TMP_DIR/$TARBALL"; then
   echo -e "${RED}Error: Failed to download release tarball.${NC}"
   exit 1
 fi
@@ -77,14 +77,10 @@ if [ ! -f "$EXTRACTED_BIN" ]; then
   EXTRACTED_BIN="$TMP_DIR/${BIN_NAME}"
 fi
 
-# Install target
+# Install target (never block on interactive sudo inside curl | bash)
 SUDO=""
 if [ ! -w "$INSTALL_DIR" ]; then
-  # Prefer ~/.local/bin if already on PATH, otherwise use sudo for /usr/local/bin
-  if [[ ":$PATH:" == *":$HOME/.local/bin:"* ]]; then
-    mkdir -p "$HOME/.local/bin"
-    INSTALL_DIR="$HOME/.local/bin"
-  elif command -v sudo >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     SUDO="sudo"
   else
     mkdir -p "$HOME/.local/bin"
